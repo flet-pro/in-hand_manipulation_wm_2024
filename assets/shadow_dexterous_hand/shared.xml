@@ -48,6 +48,7 @@
         <pair geom1="robot0:C_lfdistal" geom2="robot0:C_rfmiddle" condim="1"></pair>
         <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfdistal" condim="1"></pair>
         <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfmiddle" condim="1"></pair>
+        <pair geom1="table0" geom2="target" solref="0.02 1" solimp="0.9 0.95 0.0001"></pair>
     </contact>
 
     <tendon>
@@ -250,5 +251,12 @@
         <position name="robot0:A_THJ2" class="robot0:asset_class" user="2030" joint="robot0:THJ2" ctrlrange="-0.209 0.209" kp="1" forcerange="-0.99 0.99"></position>
         <position name="robot0:A_THJ1" class="robot0:asset_class" user="2028" joint="robot0:THJ1" ctrlrange="-0.524 0.524" kp="1" forcerange="-0.99 0.99"></position>
         <position name="robot0:A_THJ0" class="robot0:asset_class" user="2026" joint="robot0:THJ0" ctrlrange="-1.571 0" kp="1" forcerange="-0.81 0.81"></position>
+
+        <general name="A_ARTx" joint="robot0:ARTx" ctrlrange="-0.25 0.25" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
+        <general name="A_ARTy" joint="robot0:ARTy" ctrlrange="0.0 0.2" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
+        <general name="A_ARTz" joint="robot0:ARTz" ctrlrange="-0.3 0.5" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
+        <general name="A_ARRx" joint="robot0:ARRx" ctrlrange="-.75 .75" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
+        <general name="A_ARRy" joint="robot0:ARRy" ctrlrange="-.75 .75" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
+        <general name="A_ARRz" joint="robot0:ARRz" ctrlrange="-.75 .75" biastype="affine" gainprm="500 0 0" biasprm="0 -200 0" />
     </actuator>
 </mujoco>
