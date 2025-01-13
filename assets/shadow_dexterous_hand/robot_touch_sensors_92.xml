@@ -3,11 +3,11 @@
     <body name="robot0:hand mount" pos="0.3 0.65 0.45" euler="-1.5708 1.5708 3.14159">
         <inertial mass="0.1" pos="0 0 0" diaginertia="0.001 0.001 0.001"></inertial>
 
-        <joint name="robot0:ARTx" pos="0 0 0" axis="1 0 0" type="slide" range="-0.25 0.25" damping="20" limited="true"
+        <joint name="robot0:ARTx" pos="0 0 0" axis="1 0 0" type="slide" range="-10 10" damping="20" limited="true"
                margin="0.01" armature="0.001" frictionloss="0.001"/>
-        <joint name="robot0:ARTy" pos="0 0 0" axis="0 1 0" type="slide" range="0 0.2" damping="20" limited="true" margin="0.01"
+        <joint name="robot0:ARTy" pos="0 0 0" axis="0 1 0" type="slide" range="-10 10" damping="20" limited="true" margin="0.01"
                armature="0.001" frictionloss="0.001"/>
-        <joint name="robot0:ARTz" pos="0 0 0" axis="0 0 1" type="slide" range="-0.3 0.5" damping="20" limited="true"
+        <joint name="robot0:ARTz" pos="0 0 0" axis="0 0 1" type="slide" range="-10 10" damping="20" limited="true"
                margin="0.01" armature="0.001" frictionloss="0.001"/>
         <joint name="robot0:ARRx" pos="0 0 0" axis="1 0 0" type="hinge" range="-0.75 0.75" damping="20" limited="true" margin="0.01"
                armature="0.001" frictionloss="0.001"/>
@@ -32,6 +32,8 @@
                 <geom class="robot0:DC_Hand" name="robot0:C_wrist" type="capsule" pos="0 0 0" quat="0.707 0.707 0 0"
                       size="0.015 0.01" rgba="0.4 0.5 0.6 0.1"></geom>
                 <body name="robot0:palm" pos="0 0 0.034">
+                    <site name="robot0:is_out_of_bound" pos="0 0 0"/>
+
                     <inertial pos="0.006 0 0.036" quat="0.716 0.044 0.075 0.693" mass="0.3"
                               diaginertia="0.001 0.001 0.001"></inertial>
                     <joint name="robot0:WRJ0" type="hinge" pos="0 0 0" axis="1 0 0" range="-0.698 0.489" damping="0.5"
@@ -124,6 +126,8 @@
                                           size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
                                     <site name="robot0:T_fftip_tip" type="sphere" pos="0 0 0.024" size="0.008"
                                           rgba="1 1 0 0.33"/>
+
+                                    <site name="robot0:ff_pos_r" pos="0 0 0"/>
                                 </body>
                             </body>
                         </body>
@@ -194,6 +198,8 @@
                                           size="0.00451 0.00451 0.01905" rgba="1 0 0 0.33"/>
                                     <site name="robot0:T_mftip_tip" type="sphere" pos="0 0 0.024" size="0.008"
                                           rgba="1 1 0 0.33"/>
+
+                                    <site name="robot0:mf_pos_r" pos="0 0 0"/>
                                 </body>
                             </body>
                         </body>
@@ -421,6 +427,8 @@
                                               size="0.0056 0.0056 0.02218" rgba="0 0 0 0.33"/>
                                         <site name="robot0:T_thtip_tip" type="sphere" pos="0 0 0.026" size="0.01"
                                               rgba="1 1 0 0.33"/>
+
+                                        <site name="robot0:thumb_pos_r" pos="0 0 0"/>
                                     </body>
                                 </body>
                             </body>

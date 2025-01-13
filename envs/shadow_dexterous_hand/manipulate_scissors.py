@@ -12,9 +12,9 @@ ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to 
 MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
 
 DEFAULT_CAMERA_CONFIG = {
-    "distance": 1,  # 0.5
+    "distance": 0.7,  # 0.5
     "azimuth": 0.0,  # 55.0
-    "elevation": -25.0,  # -25.0
+    "elevation": -35.0,  # -25.0
     "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
 }
 
@@ -24,6 +24,13 @@ DEFAULT_CAMERA_CONFIG = {
 #     "elevation": -25.0,
 #     "lookat": np.array([1, 0.96, 0.14]),
 # }
+
+
+def compute_pos_distance(goal_a, goal_b):
+    assert goal_a.shape == (3,) and goal_b.shape == (3,)
+    delta_pos = goal_a - goal_b
+    d_pos = np.linalg.norm(delta_pos, axis=-1)
+    return d_pos
 
 
 class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
@@ -99,6 +106,8 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
             reward_type=reward_type,
             default_camera_config=DEFAULT_CAMERA_CONFIG,
+
+            distance_threshold=0.01,
             **kwargs,
         )
         EzPickle.__init__(self, target_position, target_rotation, reward_type, **kwargs)
@@ -157,9 +166,11 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         if self.randomize_initial_rotation:
             if self.target_rotation == "z":
                 angle = self.np_random.uniform(-np.pi/3, np.pi/3)  # todo this is changed to be easier
+                self.scissors_angle = angle
                 axis = np.array([0.0, 0.0, 1.0])
                 offset_quat = quat_from_angle_and_axis(angle, axis)
                 initial_quat = rotations.quat_mul(initial_quat, offset_quat)
+
             elif self.target_rotation == "parallel":
                 angle = self.np_random.uniform(-np.pi, np.pi)
                 axis = np.array([0.0, 0.0, 1.0])
@@ -212,69 +223,82 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
 
         return is_on_palm()
 
+    def __get_site_pos(self, names):
+        site_pos = []
+        for name in names:
+            self._mujoco.mj_forward(self.model, self.data)
+            cube_middle_idx = self._model_names._site_name2id[name]
+            cube_middle_pos = self.data.site_xpos[cube_middle_idx]
+            site_pos.append(cube_middle_pos)
+        return np.array(site_pos)
+
     def _sample_goal(self):
         # Select a goal for the object position.
-        target_pos = None
-        if self.target_position == "random":
-            assert self.target_position_range.shape == (3, 2)
-            offset = self.np_random.uniform(
-                self.target_position_range[:, 0], self.target_position_range[:, 1]
-            )
-            assert offset.shape == (3,)
-            target_pos = (
-                self._utils.get_joint_qpos(self.model, self.data, "target:joint")[:3]
-                + offset
-            )
-        elif self.target_position in ["ignore", "fixed"]:
-            target_pos = self._utils.get_joint_qpos(
-                self.model, self.data, "target:joint"
-            )[:3]
-        else:
-            raise error.Error(
-                f'Unknown target_position option "{self.target_position}".'
-            )
-        assert target_pos is not None
-        assert target_pos.shape == (3,)
+        # target_pos = None
+        # if self.target_position == "random":
+        #     assert self.target_position_range.shape == (3, 2)
+        #     offset = self.np_random.uniform(
+        #         self.target_position_range[:, 0], self.target_position_range[:, 1]
+        #     )
+        #     assert offset.shape == (3,)
+        #     target_pos = (
+        #         self._utils.get_joint_qpos(self.model, self.data, "target:joint")[:3]
+        #         + offset
+        #     )
+        # elif self.target_position in ["ignore", "fixed"]:
+        #     target_pos = self._utils.get_joint_qpos(
+        #         self.model, self.data, "target:joint"
+        #     )[:3]
+        # else:
+        #     raise error.Error(
+        #         f'Unknown target_position option "{self.target_position}".'
+        #     )
+        # assert target_pos is not None
+        # assert target_pos.shape == (3,)
+        #
+        # # Select a goal for the object rotation.
+        # target_quat = None
+        # if self.target_rotation == "z":
+        #     angle = self.np_random.uniform(-np.pi, np.pi)
+        #     axis = np.array([0.0, 0.0, 1.0])
+        #     target_quat = quat_from_angle_and_axis(angle, axis)
 
-        # Select a goal for the object rotation.
-        target_quat = None
-        if self.target_rotation == "z":
-            angle = self.np_random.uniform(-np.pi, np.pi)
-            axis = np.array([0.0, 0.0, 1.0])
-            target_quat = quat_from_angle_and_axis(angle, axis)
-        elif self.target_rotation == "parallel":
-            angle = self.np_random.uniform(-np.pi, np.pi)
-            axis = np.array([0.0, 0.0, 1.0])
-            target_quat = quat_from_angle_and_axis(angle, axis)
-            parallel_quat = self.parallel_quats[
-                self.np_random.integers(len(self.parallel_quats))
-            ]
-            target_quat = rotations.quat_mul(target_quat, parallel_quat)
-        elif self.target_rotation == "xyz":
-            angle = self.np_random.uniform(-np.pi, np.pi)
-            axis = self.np_random.uniform(-1.0, 1.0, size=3)
-            target_quat = quat_from_angle_and_axis(angle, axis)
-        elif self.target_rotation in ["ignore", "fixed"]:
-            target_quat = self.data.get_joint_qpos("target:joint")
-        else:
-            raise error.Error(
-                f'Unknown target_rotation option "{self.target_rotation}".'
-            )
-        assert target_quat is not None
-        assert target_quat.shape == (4,)
+        # elif self.target_rotation == "parallel":
+        #     angle = self.np_random.uniform(-np.pi, np.pi)
+        #     axis = np.array([0.0, 0.0, 1.0])
+        #     target_quat = quat_from_angle_and_axis(angle, axis)
+        #     parallel_quat = self.parallel_quats[
+        #         self.np_random.integers(len(self.parallel_quats))
+        #     ]
+        #     target_quat = rotations.quat_mul(target_quat, parallel_quat)
+        # elif self.target_rotation == "xyz":
+        #     angle = self.np_random.uniform(-np.pi, np.pi)
+        #     axis = self.np_random.uniform(-1.0, 1.0, size=3)
+        #     target_quat = quat_from_angle_and_axis(angle, axis)
+        # elif self.target_rotation in ["ignore", "fixed"]:
+        #     target_quat = self.data.get_joint_qpos("target:joint")
+        # else:
+        #     raise error.Error(
+        #         f'Unknown target_rotation option "{self.target_rotation}".'
+        #     )
 
-        target_quat /= np.linalg.norm(target_quat)  # normalized quaternion
-        goal = np.concatenate([target_pos, target_quat])
+        # assert target_quat is not None
+        # assert target_quat.shape == (4,)
+
+        # target_quat /= np.linalg.norm(target_quat)  # normalized quaternion
+        # goal = np.concatenate([target_pos, target_quat])
+
+        goal = self.__get_site_pos(["target:center", "target:hole0", "target:hole1"])
         return goal
 
     def _render_callback(self):
         # Assign current state to target object but offset a bit so that the actual object
         # is not obscured.
-        goal = self.goal.copy()
-        assert goal.shape == (7,)
-        if self.target_position == "ignore":
+        # goal = self.goal.copy()
+        # assert goal.shape == (7,)
+        # if self.target_position == "ignore":
             # Move the object to the side since we do not care about it's position.
-            goal[0] += 0.15
+            # goal[0] += 0.15
 
         # to be deprecated
         # self._utils.set_joint_qpos(self.model, self.data, "target:joint", np.array([1.2999224 , 0.75466746 ,0.8,        0.92803925, 0.,         0. ,0.37248241]))
@@ -289,9 +313,14 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
 
     def _get_achieved_goal(self):
         # todo fix achieved goal to the finger's info
-        object_qpos = self._utils.get_joint_qpos(self.model, self.data, "target:joint")
-        assert object_qpos.shape == (7,)
-        return object_qpos
+        # object_qpos = self._utils.get_joint_qpos(self.model, self.data, "target:joint")
+        # assert object_qpos.shape == (7,)
+        # return object_qpos
+
+        # fingers_qpos, _ = self._utils.robot_get_obs(
+        #     self.model, self.data, ["robot0:FFJ0", "robot0:MFJ0", "robot0:THJ0"]
+        # )
+        return self.__get_site_pos(["robot0:ff_pos_r", "robot0:mf_pos_r", "robot0:thumb_pos_r"])
 
     def _get_obs(self):
         robot_qpos, robot_qvel = self._utils.robot_get_obs(
@@ -305,21 +334,58 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         observation = np.concatenate(
             [robot_qpos, robot_qvel, object_qvel, achieved_goal]
         )
+
         return {
             "observation": observation.copy(),
             "achieved_goal": achieved_goal.copy(),
             "desired_goal": self.goal.ravel().copy(),
         }
 
+    def _is_success(self, achieved_goal, desired_goal):
+        # d_pos, d_rot = self._goal_distance(achieved_goal, desired_goal)
+        # achieved_pos = (d_pos < self.distance_threshold).astype(np.float32)
+        # achieved_rot = (d_rot < self.rotation_threshold).astype(np.float32)
+        # achieved_both = achieved_pos * achieved_rot
+        desired_goal = desired_goal.ravel()
+        ff_d = compute_pos_distance(achieved_goal[:3], desired_goal[3:6])
+        mf_d = compute_pos_distance(achieved_goal[3:6], desired_goal[3:6])
+        th_d = compute_pos_distance(achieved_goal[6:], desired_goal[6:])
+        is_in_hold = ((ff_d < self.distance_threshold)
+                      and (mf_d < self.distance_threshold)
+                      and (th_d < self.distance_threshold))
+
+        is_scissors_above = (self.__get_site_pos(["target:center"]).ravel()[2] - desired_goal[2]
+                             > 0.05)
+        return {"is_in_hold": is_in_hold, "is_scissors_above": is_scissors_above}
+
+    def __is_out_of_bound(self):
+        hand_pos = self.__get_site_pos(["robot0:is_out_of_bound"]).ravel()
+        # print(hand_pos)
+        return ((hand_pos[0] < 0.4 or hand_pos[0] > 1.65) or
+                (hand_pos[1] < 0.05 or hand_pos[1] > 1.45))
+
+    def __is_scissors_dropped(self):
+        return self.goal[0, 2] - self.__get_site_pos(["target:center"]).ravel()[2] > 0.1
+
     def compute_reward(self, achieved_goal, goal, info):
         # _reward = super().compute_reward(achieved_goal, goal, info)
-
         # need to get obs
-        return 100
+        # print(self._model_names.joint_names)
+
+        goal = goal.ravel()
+        ff_d = compute_pos_distance(achieved_goal[:3], goal[3:6])
+        mf_d = compute_pos_distance(achieved_goal[3:6], goal[3:6])
+        th_d = compute_pos_distance(achieved_goal[6:], goal[6:])
+
+        if self.__is_out_of_bound():
+            return -4
+        if info["is_success"]["is_in_hold"]:
+            return 0 + (self.__get_site_pos(["target:center"]).ravel()[2] - goal[2])
+        return -(ff_d + mf_d + th_d)
 
     def compute_terminated(self, achieved_goal, desired_goal, info):
         """All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time."""
-        return False
+        return self.__is_out_of_bound() or self.__is_scissors_dropped()
 
     def compute_truncated(self, achievec_goal, desired_goal, info):
         """The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper."""

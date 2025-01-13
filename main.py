@@ -15,6 +15,8 @@ gym.register_envs(envs)
 env = gym.make("HandManipulateScissorsGrasp-v1", render_mode="rgb_array")
 env.reset()
 
+# print(env.observation_space)
+
 # action = env.action_space.sample()
 # print(action.shape)
 # action[20:26] = 0
@@ -32,16 +34,18 @@ env.reset()
 imgs = []
 fig = plt.figure()
 
-for _ in range(30):
+for _ in range(10):
     action = env.action_space.sample()  # User-defined policy function
-    # action[:] = 0
+    action[:] = 0
+    action[22] = 1
     obs, reward, terminated, truncated, info = env.step(action)
-    # print(reward)
+    print(terminated)
+    print(reward)
 
     img = env.render()
     im = plt.imshow(img, animated=True)
     imgs.append([im])
 
-ani = ArtistAnimation(fig, imgs, interval=50, blit=True, repeat=False)
+ani = ArtistAnimation(fig, imgs, interval=100, blit=True, repeat=False)
 ani.save('videos/anim.mp4', writer="ffmpeg")
 plt.show()
