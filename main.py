@@ -34,7 +34,7 @@ env.reset()
 imgs = []
 fig = plt.figure()
 
-for _ in range(10):
+for _ in range(2):
     action = env.action_space.sample()  # User-defined policy function
     action[:] = 0
     action[22] = 1
