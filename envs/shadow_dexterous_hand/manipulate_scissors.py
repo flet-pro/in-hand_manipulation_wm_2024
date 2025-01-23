@@ -45,13 +45,13 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
 
         ## Observation Space
         The observation is a `goal-aware observation space`. It consists of a dictionary with information about the robot's joint and block states, as well as information about the goal. The dictionary consists of the following 3 keys:
-        * `observation`: its value is an `ndarray` of shape `(61 + 12 = 73,)`.
+        * `observation`: its value is an `ndarray` of shape `(30 + 30 + 9 = 69,)`.
         * It consists of kinematic information of the block (to be changed) object and finger joints.
         * index 0 to 5 is the positions info of the forearm sliders and hinges (6,)
         * index 6 to 29 is the positions info of the shadow hand itself (24,)
         * index 30 to 35 is the velocities info of the forearm sliders and hinges (6,)
         * index 36 to 59 is the velocities info of the shadow hand itself (24,)
-        * (to be changed) index 60 to 72 is the positions and velocities info of block (13,)
+        * index 36 to 74 is the positions info of three fingers (9,)
 
         ## Rewards (to be changed)
 
@@ -326,13 +326,14 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         robot_qpos, robot_qvel = self._utils.robot_get_obs(
             self.model, self.data, self._model_names.joint_names
         )
-        object_qvel = self._utils.get_joint_qvel(self.model, self.data, "target:joint")
+        # object_qvel = self._utils.get_joint_qvel(self.model, self.data, "target:joint")
         achieved_goal = (
             self._get_achieved_goal().ravel()
         )  # this contains the object position + rotation
+        # print(robot_qpos.shape, robot_qvel.shape, object_qvel.shape, achieved_goal.shape)
 
         observation = np.concatenate(
-            [robot_qpos, robot_qvel, object_qvel, achieved_goal]
+            [robot_qpos, robot_qvel, achieved_goal]
         )
 
         return {
