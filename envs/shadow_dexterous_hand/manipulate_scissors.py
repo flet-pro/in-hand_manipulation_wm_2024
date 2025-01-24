@@ -219,7 +219,7 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             return is_on_palm
 
         # Run the simulation for a bunch of timesteps to let everything settle in.
-        for _ in range(10):
+        for _ in range(1):
             self._set_action(np.zeros(20))
             try:
                 self._mujoco.mj_step(self.model, self.data, nstep=self.n_substeps)
@@ -342,9 +342,6 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         observation = np.concatenate(
             [robot_qpos, robot_qvel, achieved_goal]
         )
-
-        print(self.goal)
-        exit()
 
         return {
             "observation": observation.copy(),
