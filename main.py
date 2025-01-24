@@ -40,17 +40,17 @@ if __name__ == "__main__":
     imgs = []
     fig = plt.figure()
 
-    for _ in range(10):
+    for _ in range(30):
         action = env.action_space.sample()  # User-defined policy function
         action[:] = 0
-        action[22] = 1
+        action[22] = 0
 
         obs, obs_hand, reward, terminated, truncated, info = env.step(action)
 
-        print(obs.shape)
-        print(obs_hand.shape)
-        print(terminated)
-        print(reward)
+        # print(obs.shape)
+        # print(obs_hand.shape)
+        # print(terminated)
+        # print(reward)
 
         img = env.render()
         im = plt.imshow(img, animated=True)

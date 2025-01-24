@@ -8,15 +8,19 @@ from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
-ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
-MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
+from envs.shadow_dexterous_hand.config import MANIPULATE_SCISSORS_XML, DEFAULT_CAMERA_CONFIG
+from envs.shadow_dexterous_hand.generate_target_object import generate_target_object
 
-DEFAULT_CAMERA_CONFIG = {
-    "distance": 0.7,  # 0.5
-    "azimuth": 0.0,  # 55.0
-    "elevation": -35.0,  # -25.0
-    "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
-}
+
+# ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
+# MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
+#
+# DEFAULT_CAMERA_CONFIG = {
+#     "distance": 0.7,  # 0.5
+#     "azimuth": 0.0,  # 55.0
+#     "elevation": -35.0,  # -25.0
+#     "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
+# }
 
 # DEFAULT_CAMERA_CONFIG = {
 #     "distance": 0.5,
@@ -51,7 +55,7 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         * index 6 to 29 is the positions info of the shadow hand itself (24,)
         * index 30 to 35 is the velocities info of the forearm sliders and hinges (6,)
         * index 36 to 59 is the velocities info of the shadow hand itself (24,)
-        * index 36 to 74 is the positions info of three fingers (9,)
+        * index 60 to 68 is the positions info of three fingers (9,)
 
         ## Rewards (to be changed)
 
@@ -96,8 +100,11 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             target_position="random",
             target_rotation="z",
             reward_type="sparse",
+            target_obj_name="scissors",
             **kwargs,
     ):
+        self.target_obj_name = generate_target_object(target_obj_name)
+
         MujocoManipulateEnv.__init__(
             self,
             model_path=MANIPULATE_SCISSORS_XML,
@@ -335,6 +342,9 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         observation = np.concatenate(
             [robot_qpos, robot_qvel, achieved_goal]
         )
+
+        print(self.goal)
+        exit()
 
         return {
             "observation": observation.copy(),

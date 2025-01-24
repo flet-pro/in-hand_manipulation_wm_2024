@@ -28,28 +28,12 @@
         <include file="robot_touch_sensors_92.xml"></include>
 
 
-<!--        <body name="object" pos="1 0.87 0.2">-->
-<!--            <geom name="object" type="box" size="0.025 0.025 0.025" material="material:object" condim="4" density="567"></geom>-->
-<!--&lt;!&ndash;            <geom name="object" type="mesh" mesh="object:scissors" material="material:object" condim="4" density="567"></geom>&ndash;&gt;-->
-<!--&lt;!&ndash;            <geom name="object_hidden" type="box" size="0.024 0.024 0.024" material="material:hidden" condim="4" contype="0" conaffinity="0" mass="0"></geom>&ndash;&gt;-->
-<!--            <site name="object:center" pos="0 0 0" rgba="1 0 0 1" size="0.01 0.01 0.01"></site>-->
-<!--            <joint name="object:joint" type="free" damping="0.01"></joint>-->
-<!--        </body>-->
-
-<!--        <body name="scissors" pos="1 0.9 0.2">-->
-<!--            <geom name="scissors" type="mesh" mesh="object:scissors" material="material:object" condim="4" density="567"></geom>-->
-<!--            <geom name="scissors_hidden" type="mesh" mesh="object:scissors" material="material:hidden" condim="4" contype="0" conaffinity="0" mass="0"></geom>-->
-<!--            <site name="scissors:center" pos="0 0 0" rgba="1 0 0 0" size="0.01 0.01 0.01"></site>-->
-<!--            <joint name="scissors:joint" type="free" damping="0.01"></joint>-->
-<!--        </body>-->
-
-<!--        <site name="pos" pos="0.8 0.75 0.19" rgba="0 0 1 1" size="0.1 0.1 0.1"></site>-->
         <body pos="1.3 0.75 0.2" name="table0">
 			<geom name="table0" size="0.25 0.35 0.2" type="box" mass="2000" material="table_mat"></geom>
 		</body>
 
         <body name="target" pos="1.3 0.75 0.45">
-            <geom name="target" type="mesh" mesh="object:scissors" material="block_mat" condim="3" mass="1"></geom>
+            <include file="target_object.xml"></include>
 <!--            <geom size="0.025 0.025 0.001" type="box" condim="3" name="target" material="block_mat" mass="2"></geom>-->
             <site name="target:center" pos="0 0 0" rgba="1 0 0 1" size="0.01 0.01 0.01"></site>
             <joint name="target:joint" type="free" damping="0.01"></joint>
