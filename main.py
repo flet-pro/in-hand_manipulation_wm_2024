@@ -1,51 +1,61 @@
-import gymnasium_robotics
-import numpy as np
-
-import envs
-import matplotlib.pyplot as plt
 import gymnasium as gym
-
+import gymnasium_robotics
+from matplotlib import pyplot as plt
 from matplotlib.animation import ArtistAnimation
 
-# actually not necessary
-gym.register_envs(gymnasium_robotics)
-gym.register_envs(envs)
+import envs
 
-# env = gym.make("HandManipulateBlockRotateZ-v1", render_mode="rgb_array")
-env = gym.make("HandManipulateScissorsGrasp-v1", render_mode="rgb_array")
-env.reset()
+from models.wrapper import GymWrapper, RepeatAction
 
-# print(env.observation_space)
 
-# action = env.action_space.sample()
-# print(action.shape)
-# action[20:26] = 0
-# obs, reward, terminated, truncated, info = env.step(action)
-# img = env.render()
-#
-# print(reward)
-# print(terminated)
-# print(truncated)
-# print(obs['observation'].shape)
-# print(obs['observation'])
-# plt.imshow(img)
-# plt.show()
+ENV_NAME = "AdroitGraspPreTrain-v1"
 
-imgs = []
-fig = plt.figure()
 
-for _ in range(2):
-    action = env.action_space.sample()  # User-defined policy function
-    action[:] = 0
-    action[22] = 1
-    obs, reward, terminated, truncated, info = env.step(action)
-    print(terminated)
-    print(reward)
+def make_env() -> RepeatAction:
+    """
+    作成たラッパーをまとめて適用して環境を作成する関数．
 
-    img = env.render()
-    im = plt.imshow(img, animated=True)
-    imgs.append([im])
+    Returns
+    -------
+    env : RepeatAction
+        ラッパーを適用した環境．
+    """
+    gym.register_envs(gymnasium_robotics)
+    gym.register_envs(envs)
+    env = gym.make(ENV_NAME, render_mode="rgb_array", max_episode_steps=50)
 
-ani = ArtistAnimation(fig, imgs, interval=100, blit=True, repeat=False)
-ani.save('videos/anim.mp4', writer="ffmpeg")
-plt.show()
+    # Dreamerでは観測は64x64のRGB画像
+    # env = GymWrapper(
+    #     env, render_width=64, render_height=64
+    # )
+    # env = RepeatAction(env, skip=2)  # DreamerではActionRepeatは2
+    return env
+
+
+if __name__ == "__main__":
+    env = make_env()
+
+    obs, obs_hand = env.reset()
+
+    imgs = []
+    fig = plt.figure()
+
+    for _ in range(30):
+        action = env.action_space.sample()  # User-defined policy function
+        action[:] = 0
+        # action[22] = 0
+
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        # print(obs.shape)
+        # print(obs_hand.shape)
+        # print(terminated)
+        # print(reward)
+
+        img = env.render()
+        im = plt.imshow(img, animated=True)
+        imgs.append([im])
+
+    ani = ArtistAnimation(fig, imgs, interval=100, blit=True, repeat=False)
+    ani.save('videos/anim.mp4', writer="ffmpeg")
+    plt.show()

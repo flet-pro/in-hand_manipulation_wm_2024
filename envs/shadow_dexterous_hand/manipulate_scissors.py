@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 from gymnasium import spaces, error
 from gymnasium.utils import EzPickle
@@ -8,15 +6,19 @@ from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
-ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
-MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
+from envs.config import MANIPULATE_SCISSORS_XML, DEFAULT_CAMERA_CONFIG
+from envs.generate_target_object import generate_target_object
 
-DEFAULT_CAMERA_CONFIG = {
-    "distance": 0.7,  # 0.5
-    "azimuth": 0.0,  # 55.0
-    "elevation": -35.0,  # -25.0
-    "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
-}
+
+# ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
+# MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
+#
+# DEFAULT_CAMERA_CONFIG = {
+#     "distance": 0.7,  # 0.5
+#     "azimuth": 0.0,  # 55.0
+#     "elevation": -35.0,  # -25.0
+#     "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
+# }
 
 # DEFAULT_CAMERA_CONFIG = {
 #     "distance": 0.5,
@@ -45,13 +47,13 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
 
         ## Observation Space
         The observation is a `goal-aware observation space`. It consists of a dictionary with information about the robot's joint and block states, as well as information about the goal. The dictionary consists of the following 3 keys:
-        * `observation`: its value is an `ndarray` of shape `(61 + 12 = 73,)`.
+        * `observation`: its value is an `ndarray` of shape `(30 + 30 + 9 = 69,)`.
         * It consists of kinematic information of the block (to be changed) object and finger joints.
         * index 0 to 5 is the positions info of the forearm sliders and hinges (6,)
         * index 6 to 29 is the positions info of the shadow hand itself (24,)
         * index 30 to 35 is the velocities info of the forearm sliders and hinges (6,)
         * index 36 to 59 is the velocities info of the shadow hand itself (24,)
-        * (to be changed) index 60 to 72 is the positions and velocities info of block (13,)
+        * index 60 to 68 is the positions info of three fingers (9,)
 
         ## Rewards (to be changed)
 
@@ -96,8 +98,11 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             target_position="random",
             target_rotation="z",
             reward_type="sparse",
+            target_obj_name="block",
             **kwargs,
     ):
+        self.target_obj_name = generate_target_object(target_obj_name)
+
         MujocoManipulateEnv.__init__(
             self,
             model_path=MANIPULATE_SCISSORS_XML,
@@ -212,7 +217,7 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             return is_on_palm
 
         # Run the simulation for a bunch of timesteps to let everything settle in.
-        for _ in range(10):
+        for _ in range(1):
             self._set_action(np.zeros(20))
             try:
                 self._mujoco.mj_step(self.model, self.data, nstep=self.n_substeps)
@@ -326,13 +331,14 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
         robot_qpos, robot_qvel = self._utils.robot_get_obs(
             self.model, self.data, self._model_names.joint_names
         )
-        object_qvel = self._utils.get_joint_qvel(self.model, self.data, "target:joint")
+        # object_qvel = self._utils.get_joint_qvel(self.model, self.data, "target:joint")
         achieved_goal = (
             self._get_achieved_goal().ravel()
         )  # this contains the object position + rotation
+        # print(robot_qpos.shape, robot_qvel.shape, object_qvel.shape, achieved_goal.shape)
 
         observation = np.concatenate(
-            [robot_qpos, robot_qvel, object_qvel, achieved_goal]
+            [robot_qpos, robot_qvel, achieved_goal]
         )
 
         return {

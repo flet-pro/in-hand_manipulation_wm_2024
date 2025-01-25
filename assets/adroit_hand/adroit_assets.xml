@@ -66,6 +66,9 @@
         <mesh name="TH3_z" file="TH3_z.stl" />
         <mesh name="TH2_z" file="TH2_z.stl" />
         <mesh name="TH1_z" file="TH1_z.stl" />
+
+<!--        objでもstlでも沈み込みは対して変わらない 1/25-->
+        <mesh name="object:scissors" scale="0.001 0.001 0.001" file="scissors_1.obj" />
     </asset>
 
     <contact>
