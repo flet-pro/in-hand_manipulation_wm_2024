@@ -1,4 +1,4 @@
 
 <mujoco>
-    <geom name="target" type="mesh" mesh="object:scissors" material="block_mat" condim="3" mass="1"></geom>
+    <geom name="target" type="box" size="0.01 0.01 0.01" material="block_mat" condim="3" mass="1"></geom>
 </mujoco>

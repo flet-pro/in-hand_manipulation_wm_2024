@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 from gymnasium import spaces, error
 from gymnasium.utils import EzPickle
@@ -8,8 +6,8 @@ from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
-from envs.shadow_dexterous_hand.config import MANIPULATE_SCISSORS_XML, DEFAULT_CAMERA_CONFIG
-from envs.shadow_dexterous_hand.generate_target_object import generate_target_object
+from envs.config import MANIPULATE_SCISSORS_XML, DEFAULT_CAMERA_CONFIG
+from envs.generate_target_object import generate_target_object
 
 
 # ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
@@ -100,7 +98,7 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             target_position="random",
             target_rotation="z",
             reward_type="sparse",
-            target_obj_name="scissors",
+            target_obj_name="block",
             **kwargs,
     ):
         self.target_obj_name = generate_target_object(target_obj_name)

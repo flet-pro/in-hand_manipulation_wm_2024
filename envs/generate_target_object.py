@@ -1,6 +1,6 @@
 import random
 
-from envs.shadow_dexterous_hand.config import TARGET_OBJECT_XML, TARGET_OBJECT_DICT, TARGET_OBJECT_STR
+from envs.config import TARGET_OBJECT_XML, TARGET_OBJECT_DICT, TARGET_OBJECT_STR
 
 from gymnasium import error
 

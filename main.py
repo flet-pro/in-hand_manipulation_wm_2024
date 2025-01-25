@@ -8,7 +8,7 @@ import envs
 from models.wrapper import GymWrapper, RepeatAction
 
 
-ENV_NAME = "HandManipulateScissorsGrasp-v1"
+ENV_NAME = "AdroitGraspPreTrain-v1"
 
 
 def make_env() -> RepeatAction:
@@ -25,10 +25,10 @@ def make_env() -> RepeatAction:
     env = gym.make(ENV_NAME, render_mode="rgb_array", max_episode_steps=50)
 
     # Dreamerでは観測は64x64のRGB画像
-    env = GymWrapper(
-        env, render_width=64, render_height=64
-    )
-    env = RepeatAction(env, skip=2)  # DreamerではActionRepeatは2
+    # env = GymWrapper(
+    #     env, render_width=64, render_height=64
+    # )
+    # env = RepeatAction(env, skip=2)  # DreamerではActionRepeatは2
     return env
 
 
@@ -43,9 +43,9 @@ if __name__ == "__main__":
     for _ in range(30):
         action = env.action_space.sample()  # User-defined policy function
         action[:] = 0
-        action[22] = 0
+        # action[22] = 0
 
-        obs, obs_hand, reward, terminated, truncated, info = env.step(action)
+        obs, reward, terminated, truncated, info = env.step(action)
 
         # print(obs.shape)
         # print(obs_hand.shape)
