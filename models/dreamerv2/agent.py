@@ -1,179 +1,151 @@
-import numpy as np
 import torch
+import torch.distributions as td
+from torch.distributions import Normal, Categorical, OneHotCategorical, OneHotCategoricalStraightThrough
+from torch.distributions.kl import kl_divergence
 from torch import nn
-from torch.distributions import Normal
 from torch.nn import functional as F
+from torch.nn.utils import clip_grad_norm_
 
-from models.dreamerv2.encoder import Encoder
-from models.dreamerv2.rssm import RSSM
-from models.dreamerv2.utils import preprocess_obs
+class Encoder(nn.Module):
+    def __init__(self):
+        super().__init__()
 
+        self.conv1 = nn.Conv2d(1, 48, kernel_size=4, stride=2)
+        self.conv2 = nn.Conv2d(48, 96, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(96, 192, kernel_size=4, stride=2)
+        self.conv4 = nn.Conv2d(192, 384, kernel_size=4, stride=2)
 
-class ValueModel(nn.Module):
-    """
-    低次元の状態表現(state_dim + rnn_hidden_dim)から状態価値を出力するクラス．
-    """
-
-    def __init__(
-            self,
-            state_dim: int,
-            rnn_hidden_dim: int,
-            hidden_dim: int = 400,
-            act: "function" = F.elu,
-    ) -> None:
+    def forward(self, obs: torch.Tensor):
         """
-        コンストラクタ．
+        観測画像をベクトルに埋め込むためのEncoder．
 
         Parameters
         ----------
-        state_dim : int
-            確率的状態sの次元数．
-        rnn_hidden_dim : int
-            決定的状態hの次元数．
-        hidden_dim : int
-            モデルの隠れ層の次元数． (default=400)
-        act : function
-            モデルの活性化関数． (default=torch.nn.functional.elu)
-        """
-        super(ValueModel, self).__init__()
-        self.fc1 = nn.Linear(state_dim + rnn_hidden_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc4 = nn.Linear(hidden_dim, 1)
-        self.act = act
-
-    def forward(self, state: torch.Tensor, rnn_hidden: torch.Tensor) -> torch.Tensor:
-        """
-        順伝播を行うメソッド．低次元の状態表現から状態価値を推定する．
-
-        Parameters
-        ----------
-        state : torch.Tensor (batch size, state dim)
-            確率的状態s．
-        rnn_hidden : torch.Tensor (batch size, rnn_hidden_dim)
-            決定的状態h．
+        obs : torch.Tensor (B, C, H, W)
+            入力となる観測画像．
 
         Returns
         -------
-        state_value : torch.Tensor (batch size, 1)
-            入力された状態に対する状態価値の推定値．
+        embedded_obs : torch.Tensor (B, D)
+            観測画像をベクトルに変換したもの．Dは入力画像の幅と高さに依存して変わる．
+            入力が(B, 3, 64, 64)の場合，出力は(B, 1536)になる．
         """
-        hidden = self.act(self.fc1(torch.cat([state, rnn_hidden], dim=1)))
-        hidden = self.act(self.fc2(hidden))
-        hidden = self.act(self.fc3(hidden))
-        state_value = self.fc4(hidden)
-        return state_value
+        hidden = F.elu(self.conv1(obs))
+        hidden = F.elu(self.conv2(hidden))
+        hidden = F.elu(self.conv3(hidden))
+        embedded_obs = self.conv4(hidden).reshape(hidden.size(0), -1)
 
+        return embedded_obs  # x_t
 
-class ActionModel(nn.Module):
-    """
-    低次元の状態表現(state_dim + rnn_hidden_dim)から行動を計算するクラス．
-    """
+class RSSM(nn.Module):
+    def __init__(self, mlp_hidden_dim: int, rnn_hidden_dim: int, state_dim: int, num_classes: int, action_dim: int):
+        super().__init__()
 
-    def __init__(
-            self,
-            state_dim: int,
-            rnn_hidden_dim: int,
-            action_dim: int,
-            hidden_dim: int = 400,
-            act: "function" = F.elu,
-            min_stddev: float = 1e-4,
-            init_stddev: float = 5.0,
-    ) -> None:
-        """
-        コンストラクタ．
+        self.rnn_hidden_dim = rnn_hidden_dim
+        self.state_dim = state_dim
+        self.num_classes = num_classes
 
-        Parameters
-        ----------
-        state_dim : int
-            確率的状態sの次元数．
-        rnn_hidden_dim : int
-            決定的状態hの次元数．
-        action_dim : int
-            行動空間の次元数．
-        hidden_dim : int
-            モデルの隠れ層の次元数． (default=400)
-        act : function
-            モデルの活性化関数． (default=torch.nn.functional.elu)
-        min_stddev : float
-            行動をサンプリングする分布の標準偏差の最小値． (default=1e-4)
-        init_stddev : float
-            行動をサンプリングする分布の標準偏差の初期値． (default=5.0)
-        """
-        super(ActionModel, self).__init__()
-        self.fc1 = nn.Linear(state_dim + rnn_hidden_dim, hidden_dim)
+        # Recurrent model
+        # h_t = f(h_t-1, z_t-1, a_t-1)
+        self.transition_hidden = nn.Linear(state_dim * num_classes + action_dim, mlp_hidden_dim)
+        self.transition = nn.GRUCell(mlp_hidden_dim, rnn_hidden_dim)
+
+        # transition predictor
+        self.prior_hidden = nn.Linear(rnn_hidden_dim, mlp_hidden_dim)
+        self.prior_logits = nn.Linear(mlp_hidden_dim, state_dim * num_classes)
+
+        # representation model
+        self.posterior_hidden = nn.Linear(rnn_hidden_dim + 1536, mlp_hidden_dim)
+        self.posterior_logits = nn.Linear(mlp_hidden_dim, state_dim * num_classes)
+
+    def recurrent(self, state: torch.Tensor, action: torch.Tensor, rnn_hidden: torch.Tensor):
+        # recullent model: h_t = f(h_t-1, z_t-1, a_t-1)を計算する
+        hidden = F.elu(self.transition_hidden(torch.cat([state, action], dim=1)))
+        rnn_hidden = self.transition(hidden, rnn_hidden)
+
+        return rnn_hidden  # h_t
+
+    def get_prior(self, rnn_hidden: torch.Tensor, detach=False):
+        # transition predictor: \hat{z}_t ~ p(z\hat{z}_t | h_t)
+        hidden = F.elu(self.prior_hidden(rnn_hidden))
+        logits = self.prior_logits(hidden)
+        logits = logits.reshape(logits.shape[0], self.state_dim, self.num_classes)
+
+        prior_dist = td.Independent(OneHotCategoricalStraightThrough(logits=logits), 1)
+        if detach:
+            detach_prior = td.Independent(OneHotCategoricalStraightThrough(logits=logits.detach()), 1)
+            return prior_dist, detach_prior  # p(z\hat{z}_t | h_t)
+        return prior_dist
+
+    def get_posterior(self, rnn_hidden: torch.Tensor, embedded_obs: torch.Tensor, detach=False):
+        # representation predictor: z_t ~ q(z_t | h_t, o_t)
+        hidden = F.elu(self.posterior_hidden(torch.cat([rnn_hidden, embedded_obs], dim=1)))
+        logits = self.posterior_logits(hidden)
+        logits = logits.reshape(logits.shape[0], self.state_dim, self.num_classes)
+
+        posterior_dist = td.Independent(OneHotCategoricalStraightThrough(logits=logits), 1)
+        if detach:
+            detach_posterior = td.Independent(OneHotCategoricalStraightThrough(logits=logits.detach()), 1)
+            return posterior_dist, detach_posterior  # q(z_t | h_t, o_t)
+        return posterior_dist
+    
+class Actor(nn.Module):
+    def __init__(self, action_dim: int, hidden_dim: int, rnn_hidden_dim: int, state_dim: int, num_classes: int):
+        super().__init__()
+
+        self.fc1 = nn.Linear(state_dim * num_classes + rnn_hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, hidden_dim)
         self.fc4 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_mean = nn.Linear(hidden_dim, action_dim)
-        self.fc_stddev = nn.Linear(hidden_dim, action_dim)
-        self.act = act
-        self.min_stddev = min_stddev
-        self.init_stddev = np.log(np.exp(init_stddev) - 1)
+        self.out = nn.Linear(hidden_dim, action_dim)
 
-    def forward(
-            self, state: torch.Tensor, rnn_hidden: torch.Tensor, training: bool = True
-    ) -> None:
+    def forward(self, state: torch.tensor, rnn_hidden: torch.Tensor, eval: bool = False):
         """
-        順伝播を行うメソッド．入力された状態に対する行動を出力する．
-        training=Trueなら，NNのパラメータに関して微分可能な形の行動のサンプル（Reparametrizationによる）を返す．
-        training=Falseなら，行動の確率分布の平均値を返す．
+        確率的状態を入力として，criticで推定される価値が最大となる行動を出力する．
 
         Parameters
         ----------
-        staet : torch.Tensor (batch size, state dim)
-            確率的状態s．
-        rnn_hidden : torch.Tensor (batch size, rnn_hidden_dim)
-            決定的状態h．
-        training : bool
-            訓練か推論かを示すフラグ． (default=True)
+        state : torch.Tensor (B, state_dim * num_classes)
+            確率的状態．
+        rnn_hidden : torch.Tensor (B, rnn_hidden_dim)
+            決定論的状態．
 
         Returns
         -------
-        action : torch.Tensor (batch size, action dim)
-            入力された状態に対する行動．
-            training=Trueでは微分可能な形の行動をサンプリングした値，
-            training=Falseでは行動の確率分布の平均値を返す．
+        action : torch.Tensor (B, 1)
+            行動．
+        action_log_prob : torch.Tensor(B, 1)
+            予測した行動をとる確率の対数．
+        action_entropy : torch.Tensor(B, 1)
+            予測した確率分布のエントロピー．エントロピー正則化に使用．
         """
-        hidden = self.act(self.fc1(torch.cat([state, rnn_hidden], dim=1)))
-        hidden = self.act(self.fc2(hidden))
-        hidden = self.act(self.fc3(hidden))
-        hidden = self.act(self.fc4(hidden))
+        hidden = F.elu(self.fc1(torch.cat([state, rnn_hidden], dim=1)))
+        hidden = F.elu(self.fc2(hidden))
+        hidden = F.elu(self.fc3(hidden))
+        hidden = F.elu(self.fc4(hidden))
+        logits = self.out(hidden)
 
-        # Dreamerの実装に合わせて少し平均と分散に対する簡単な変換が入っています
-        mean = self.fc_mean(hidden)
-        mean = 5.0 * torch.tanh(mean / 5.0)
-        stddev = self.fc_stddev(hidden)
-        stddev = F.softplus(stddev + self.init_stddev) + self.min_stddev
+        if eval:
+            action = torch.argmax(logits, dim=1)
+            action = F.one_hot(action, logits.shape[1])
+            return action, None, None
 
-        if training:
-            action = torch.tanh(Normal(mean, stddev).rsample())  # 微分可能にするためrsample()
-        else:
-            action = torch.tanh(mean)
-        return action
+        action_dist = OneHotCategorical(logits=logits)  # 行動をサンプリングする分布: p_{\psi} (\hat{a}_t | \hat{z}_t)
+        action = action_dist.sample()  # 行動: \hat{a}_t
 
+        # Straight-Throught Estimatorで勾配を通す．
+        action = action + action_dist.probs - action_dist.probs.detach()
+
+        action_log_prob = action_dist.log_prob(torch.round(action.detach()))
+        action_entropy = action_dist.entropy()
+
+        return action, action_log_prob, action_entropy
 
 class Agent:
     """
-    ActionModelに基づき行動を決定する．そのためにRSSMを用いて状態表現をリアルタイムで推論して維持するクラス．
+    ActionModelに基づき行動を決定する. そのためにRSSMを用いて状態表現をリアルタイムで推論して維持するクラス
     """
-
-    def __init__(self, encoder: Encoder, rssm: RSSM, action_model: ActionModel) -> None:
-        """
-        コンストラクタ．
-
-        Parameters
-        ----------
-        encoder : Encoder
-            上で定義したEncoderクラスのインスタンス．
-            観測画像を1024次元のベクトルに埋め込む ．
-        rssm : RSSM
-            上で定義したRSSMクラスのインスタンス．
-            遷移モデル，1024次元のベクトルを観測画像にするデコーダ，報酬を予測するモデルを持つ．
-        action_model : ActionModel
-            上で定義したActionModelのインスタンス．
-            低次元の状態表現から行動を予測する．
-        """
+    def __init__(self, encoder, rssm, action_model):
         self.encoder = encoder
         self.rssm = rssm
         self.action_model = action_model
@@ -181,49 +153,24 @@ class Agent:
         self.device = next(self.action_model.parameters()).device
         self.rnn_hidden = torch.zeros(1, rssm.rnn_hidden_dim, device=self.device)
 
-    def __call__(self, obs: np.ndarray, obs_hand: np.ndarray, training=True) -> np.ndarray:
-        """
-        特殊メソッド．
-        インスタンスに直接引数を渡すことで実行される．
-        （例）agent = Agent(*args)
-             action = agent(obs)  # このときに__call__メソッドが呼び出される．
-
-        Parameters
-        ----------
-        obs : np.ndarray (batch size, 3, 64, 64)
-            環境から得られた観測画像．
-        training : bool
-            訓練か推論かを示すフラグ． (default=True)
-
-        Returns
-        -------
-        action : np.ndarray (batch size, action dim)
-            入力された観測に対する行動の予測．
-        """
-        # preprocessを適用，PyTorchのためにChannel-Firstに変換
+    def __call__(self, obs, eval=False):
+        # preprocessを適用, PyTorchのためにChannel-Firstに変換
         obs = preprocess_obs(obs)
         obs = torch.as_tensor(obs, device=self.device)
-        # print("obs shape: ", obs.shape)
         obs = obs.transpose(1, 2).transpose(0, 1).unsqueeze(0)
 
-        obs_hand = torch.as_tensor(obs_hand, device=self.device).unsqueeze(0)
-
         with torch.no_grad():
-            # 観測を低次元の表現に変換し，posteriorからのサンプルをActionModelに入力して行動を決定する
-            embedded_obs = self.encoder(obs, obs_hand).to(torch.float32)
-            state_posterior = self.rssm.posterior(self.rnn_hidden, embedded_obs)
-            state = state_posterior.sample()
-            action = self.action_model(state, self.rnn_hidden, training=training)
+            # 観測を低次元の表現に変換し, posteriorからのサンプルをActionModelに入力して行動を決定する
+            embedded_obs = self.encoder(obs)
+            state_posterior = self.rssm.get_posterior(self.rnn_hidden, embedded_obs)
+            state = state_posterior.sample().flatten(1)
+            action, _, _  = self.action_model(state, self.rnn_hidden, eval=eval)
 
             # 次のステップのためにRNNの隠れ状態を更新しておく
-            _, self.rnn_hidden = self.rssm.prior(
-                self.rssm.recurrent(state, action, self.rnn_hidden)
-            )
+            self.rnn_hidden = self.rssm.recurrent(state, action, self.rnn_hidden)
 
         return action.squeeze().cpu().numpy()
 
-    def reset(self) -> None:
-        """
-        RNNの隠れ状態（=決定的状態）をリセットする．
-        """
+    #RNNの隠れ状態をリセット
+    def reset(self):
         self.rnn_hidden = torch.zeros(1, self.rssm.rnn_hidden_dim, device=self.device)
