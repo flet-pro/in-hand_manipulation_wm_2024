@@ -2,11 +2,11 @@ import numpy as np
 from gymnasium import spaces, error
 from gymnasium.utils import EzPickle
 
-from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv
+from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv, MujocoHandEnv
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
-from envs.config import MANIPULATE_SCISSORS_XML, DEFAULT_CAMERA_CONFIG
+from envs.config import GRASP_OBJECT_ENV_XML, DEFAULT_CAMERA_CONFIG
 from envs.generate_target_object import generate_target_object
 
 
@@ -35,7 +35,7 @@ def compute_pos_distance(goal_a, goal_b):
     return d_pos
 
 
-class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
+class GraspObjectEnv(MujocoHandEnv, EzPickle):
     """
         ## Description
 
@@ -98,21 +98,42 @@ class MujocoHandScissorsEnv(MujocoManipulateEnv, EzPickle):
             target_position="random",
             target_rotation="z",
             reward_type="sparse",
-            target_obj_name="block",
+            target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
+            initial_qpos=None,
+            randomize_initial_position=True,
+            randomize_initial_rotation=True,
+            distance_threshold=0.01,
+            rotation_threshold=0.1,
+            n_substeps=20,
+            relative_control=False,
+            ignore_z_target_rotation=False,
+            target_obj_name="random",
             **kwargs,
     ):
         self.target_obj_name = generate_target_object(target_obj_name)
 
-        MujocoManipulateEnv.__init__(
-            self,
-            model_path=MANIPULATE_SCISSORS_XML,
-            target_position=target_position,
-            target_rotation=target_rotation,
-            target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
-            reward_type=reward_type,
-            default_camera_config=DEFAULT_CAMERA_CONFIG,
+        self.target_position = target_position
+        self.target_rotation = target_rotation
+        self.target_position_range = target_position_range
+        self.parallel_quats = [
+            rotations.euler2quat(r) for r in rotations.get_parallel_rotations()
+        ]
+        self.randomize_initial_rotation = randomize_initial_rotation
+        self.randomize_initial_position = randomize_initial_position
+        self.distance_threshold = distance_threshold
+        self.rotation_threshold = rotation_threshold
+        self.reward_type = reward_type
+        self.ignore_z_target_rotation = ignore_z_target_rotation
 
-            distance_threshold=0.01,
+        assert self.target_position in ["ignore", "fixed", "random"]
+        assert self.target_rotation in ["ignore", "fixed", "xyz", "z", "parallel"]
+        initial_qpos = initial_qpos or {}
+
+        super().__init__(
+            model_path=GRASP_OBJECT_ENV_XML,
+            n_substeps=n_substeps,
+            initial_qpos=initial_qpos,
+            relative_control=relative_control,
             **kwargs,
         )
         EzPickle.__init__(self, target_position, target_rotation, reward_type, **kwargs)

@@ -8,7 +8,9 @@ import envs
 from models.wrapper import GymWrapper, RepeatAction
 
 
-ENV_NAME = "AdroitGraspPreTrain-v1"
+ENV_NAME = "ShadowHandGraspObject-v1"
+# AdroitGraspPreTrain
+# ShadowHandGraspObject
 
 
 def make_env() -> RepeatAction:
@@ -43,7 +45,7 @@ if __name__ == "__main__":
     for _ in range(30):
         action = env.action_space.sample()  # User-defined policy function
         action[:] = 0
-        # action[22] = 0
+        action[2] = -1
 
         obs, reward, terminated, truncated, info = env.step(action)
 

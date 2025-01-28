@@ -11,10 +11,20 @@
     <asset>
         <include file="shared_asset.xml"></include>
 
+        <texture type="cube" name="marblecube" file="marble.png" />
+        <texture type="2d" name="groundplane" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" width="100" height="100" />
+        <texture type="cube" name="woodb" file="woodb.png" />
+        <texture type="2d" name="marble2d" file="marble.png" />
+
         <texture name="texture:object" file="block.png" gridsize="3 4" gridlayout=".U..LFRB.D.."></texture>
         <texture name="texture:hidden" file="block_hidden.png" gridsize="3 4" gridlayout=".U..LFRB.D.."></texture>
 
         <material name="MatPlane" specular="0.3" shininess="0.3" rgba="0 0 0 1" />
+        <material name="groundplane" texture="groundplane" texrepeat="10 10" />
+        <material name="tablecube" texture="marblecube" rgba="0.8 0.8 0.8 1" />
+        <material name="table2d" texture="marble2d" reflectance="0.3" rgba="0.8 0.8 0.8 1" />
+
+        <material name="MatWoodB" texture="woodb" specular="1" shininess="0.3" />
 
         <material name="material:object" texture="texture:object" specular="1" shininess="0.3" reflectance="0"></material>
         <material name="material:hidden" texture="texture:hidden" specular="1" shininess="0.3" reflectance="0"></material>
@@ -22,20 +32,33 @@
     </asset>
 
     <worldbody>
-        <geom name="floor0" pos="0.8 0.75 0" size="0.85 0.7 1" type="plane" condim="3" material="floor_mat"></geom>
-        <body name="floor0" pos="1 1 0"></body>
+<!--        <geom name="floor0" pos="0.8 0.75 0" size="0.85 0.7 1" type="plane" condim="3" material="floor_mat"></geom>-->
+<!--        <body name="floor0" pos="1 1 0"></body>-->
+
+        <geom name='floor0' size="0.85 0.7 1" pos="0.8 0.75 0" type="plane" contype="3" conaffinity="0" material="groundplane" />
 
         <include file="robot_touch_sensors_92.xml"></include>
 
 
-        <body pos="1.3 0.75 0.2" name="table0">
-			<geom name="table0" size="0.25 0.35 0.2" type="plane" mass="2000" material="table_mat"></geom>
-		</body>
+<!--        <body pos="1.3 0.75 0.2" name="table0">-->
+<!--			<geom name="table0" size="0.25 0.35 0.2" type="plane" mass="2000" material="table_mat"></geom>-->
+<!--		</body>-->
 
-        <body pos="1.3 0.75 0.9">
-            <geom type="box" size="0.01 0.01 0.01" material="block_mat" condim="3" mass="1"></geom>
-            <joint type="free" damping="0.01"></joint>
+        <!-- ======= TABLE ======= -->
+        <body name="table0" pos="1.3 0.75 0.2">
+<!--            Plane has better contacts-->
+<!--            <geom name="table0" size="0.25 0.35 0.025" pos="0 0 -0.025" type="plane" material="table2d" />-->
+            <geom name="table0" size="0.25 0.35 0.025" pos="0 0 -0.025" type="box" material="tablecube" />
+<!--            <geom size="0.04 0.5" pos="0.4 0.4 -0.501" quat="0 1 0 0" type="cylinder" contype="0" conaffinity="0" />-->
+<!--            <geom size="0.04 0.5" pos="-0.4 0.4 -0.501" quat="0 1 0 0" type="cylinder" contype="0" conaffinity="0" />-->
+<!--            <geom size="0.04 0.5" pos="0.4 -0.4 -0.501" quat="0 1 0 0" type="cylinder" contype="0" conaffinity="0" />-->
+<!--            <geom size="0.04 0.5" pos="-0.4 -0.4 -0.501" quat="0 1 0 0" type="cylinder" contype="0" conaffinity="0" />-->
         </body>
+
+<!--        <body name="falling_block" pos="1.3 0.75 0.9">-->
+<!--            <geom type="box" size="0.01 0.01 0.01" material="block_mat" condim="3" mass="1"></geom>-->
+<!--            <joint type="free" damping="0.01"></joint>-->
+<!--        </body>-->
 
         <body name="target" pos="1.3 0.75 0.45">
             <include file="target_object.xml"></include>

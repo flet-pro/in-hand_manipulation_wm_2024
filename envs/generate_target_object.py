@@ -8,9 +8,9 @@ from gymnasium import error
 def generate_target_object(target_obj="random"):
     if target_obj == "random":
         obj_name, obj_str = random.choice(list(TARGET_OBJECT_DICT.items()))
-    elif target_obj == "block":
-        obj_name = "block"
-        obj_str = TARGET_OBJECT_DICT["block"]
+    # elif target_obj == "block":
+    #     obj_name = "block"
+    #     obj_str = TARGET_OBJECT_DICT["block"]
     elif target_obj == "scissors":
         obj_name = "scissors"
         obj_str = TARGET_OBJECT_DICT["scissors"]

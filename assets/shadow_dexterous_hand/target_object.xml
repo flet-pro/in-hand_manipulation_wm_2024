@@ -1,4 +1,4 @@
 
 <mujoco>
-    <geom name="target" type="box" size="0.01 0.01 0.01" material="block_mat" condim="3" mass="1"></geom>
+    <geom name="target" euler="0 0 0" type="sphere" size="0.035" material="block_mat" condim="4" mass="1" />
 </mujoco>
