@@ -21,6 +21,7 @@ from torch.nn.utils import clip_grad_norm_
 
 import gymnasium as gym
 import gymnasium_robotics
+gym.register_envs(gymnasium_robotics)
 
 from models.dreamerv2 import (
     Agent,
@@ -34,10 +35,72 @@ from models.dreamerv2 import (
     preprocess_obs,
     calculate_lambda_target,
 )
+from models.replay_buffer import ReplayBuffer
 from models.wrapper import GymWrapper, RepeatAction
 
 ENV_NAME = 'HandManipulateBoxRotate_BooleanTouchSensorsDense-v1'
 
+
+# 環境設定
+class CustomManipulateBoxEnv(gym.Env):
+    def __init__(self, env):
+        self.env = env
+
+    def reset(self, **kwargs):
+        observation, info = self.env.reset(**kwargs)
+        return observation, info
+
+    def step(self, action):
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        image = self.env.render()
+        return image, reward, terminated, truncated, info
+
+    def render(self):
+        return self.env.render()
+
+    def close(self):
+        self.env.close()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+class RepeatAction(CustomManipulateBoxEnv):
+    def __init__(self, env, skip=4, max_steps=100_000):
+        gym.Wrapper.__init__(self, env)
+        self.max_steps = max_steps if max_steps else float("inf")
+        self.steps = 0
+        self.height = env.observation_space.shape[0]
+        self.width = env.observation_space.shape[1]
+        self._skip = skip
+
+    @property
+    def observation_space():
+        img = self.env.render()
+        return gym.spaces.Box(img)
+        
+    def reset(self):
+        obs = self.env.reset()
+        return obs[0]
+
+    def step(self, action):
+        if self.steps >= self.max_steps:
+            print("Reached max iterations.")
+            return None
+
+        total_reward = 0.0
+        self.steps += 1
+        for _ in range(self._skip):
+            obs, reward, done, _, info = self.env.step(action)
+            img = self.env.render()
+
+            total_reward += reward
+            if self.steps >= self.max_steps:
+                done = True
+
+            if done:
+                break
+
+        return img, total_reward, done, info
 
 def make_env(seed=None, max_steps=50) -> RepeatAction:
     """
@@ -48,17 +111,17 @@ def make_env(seed=None, max_steps=50) -> RepeatAction:
     env : RepeatAction
         ラッパーを適用した環境．
     """
-    gym.register_envs(gymnasium_robotics)
     env = gym.make('HandManipulateBlockRotateZ_BooleanTouchSensorsDense-v1', render_mode="rgb_array", max_episode_steps=max_steps)
     env.reset(seed=seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
     # Dreamerでは観測は64x64のRGB画像
+    env = CustomManipulateBoxEnv(env)
     env = GymWrapper(
         env, render_width=64, render_height=64
     )
-    env = RepeatAction(env, skip=2)  # DreamerではActionRepeatは2
+    env = RepeatAction(env, skip=4)  # DreamerではActionRepeatは2
     return env
 
 def set_seed(seed: int) -> None:
