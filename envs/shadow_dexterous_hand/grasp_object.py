@@ -134,6 +134,7 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
             n_substeps=n_substeps,
             initial_qpos=initial_qpos,
             relative_control=relative_control,
+            default_camera_config=DEFAULT_CAMERA_CONFIG,
             **kwargs,
         )
         EzPickle.__init__(self, target_position, target_rotation, reward_type, **kwargs)
