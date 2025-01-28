@@ -21,45 +21,32 @@ def preprocess_obs(obs: np.ndarray) -> np.ndarray:
     return normalized_obs
 
 
-def lambda_target(
-    rewards: torch.Tensor, values: torch.Tensor, gamma: float, lambda_: float
-) -> torch.Tensor:
+def calculate_lambda_target(rewards: torch.Tensor, discounts: torch.Tensor, values: torch.Tensor, lambda_: float):
     """
-    価値関数の学習のためのλ-returnを計算する関数．
+    lambda targetを計算する関数．
 
     Parameters
-    ----------
-    rewards : torch.Tensor (imagination_horizon, batch size * (chank length - 1))
-        報酬モデルによる報酬の推定値．
-    values : torch.Tensor (imagination_horizon, batch size * (chank length - 1))
-        価値関数を近似するValueモデルによる状態価値観数の推定値．
-    gamma : float
-        割引率．
+    ---------
+    rewards : torch.Tensor (imagination_horizon, D)
+        報酬．1次元目が時刻tを表しており，2次元目は自由な次元数にでき，想像の軌道を作成するときに入力されるサンプルindexと考える．
+    discounts : torch.Tensor (imagination_horizon, D)
+        割引率．gammaそのままを利用するのではなく，DiscountModelの出力をかけて利用する．
+    values : torch.Tensor (imagination_horizon, D)
+        状態価値関数．criticで予測された値を利用するが，Dreamer v2ではtarget networkで計算する．
     lambda_ : float
-        λ-returnのパラメータλ．
+        lambda targetのハイパラ．
 
-    V_lambda : torch.Tensor (imagination_horizon, batch size * (chank length - 1))
-        各状態に対するλ-returnの値．
+    Returns
+    -------
+    V_lambda : torch.Tensor (imagination_horizon, D)
+        lambda targetの値．
     """
-    V_lambda = torch.zeros_like(rewards, device=rewards.device)
+    V_lambda = torch.zeros_like(rewards)
 
-    H = rewards.shape[0] - 1
-    V_n = torch.zeros_like(rewards, device=rewards.device)
-    V_n[H] = values[H]
-    for n in range(1, H + 1):
-        # まずn-step returnを計算します
-        # 注意: 系列が途中で終わってしまったら，可能な中で最大のnを用いたn-stepを使います
-        V_n[:-n] = (gamma**n) * values[n:]
-        for k in range(1, n + 1):
-            if k == n:
-                V_n[:-n] += (gamma ** (n - 1)) * rewards[k:]
-            else:
-                V_n[:-n] += (gamma ** (k - 1)) * rewards[k : -n + k]
-
-        # lambda_でn-step returnを重みづけてλ-returnを計算します
-        if n == H:
-            V_lambda += (lambda_ ** (H - 1)) * V_n
+    for t in reversed(range(rewards.shape[0])):
+        if t == rewards.shape[0] - 1:
+            V_lambda[t] = rewards[t] + discounts[t] * values[t]  # t=Hの場合（式4の下の条件）
         else:
-            V_lambda += (1 - lambda_) * (lambda_ ** (n - 1)) * V_n
+            V_lambda[t] = rewards[t] + discounts[t] * ((1-lambda_) * values[t+1] + lambda_ * V_lambda[t+1])
 
     return V_lambda

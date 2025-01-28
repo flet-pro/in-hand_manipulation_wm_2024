@@ -1,4 +1,6 @@
-/venv
+/.venv
+/logs
+/notebook/wandb
 
 **/__pycache__
 
