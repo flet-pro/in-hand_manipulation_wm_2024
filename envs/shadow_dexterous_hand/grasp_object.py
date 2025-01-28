@@ -95,58 +95,56 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
 
     def __init__(
             self,
-            random_init_pos="random",
-            random_init_rot="z",
-            reward_type="sparse",
-            target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
-            initial_qpos=None,
-            distance_threshold=0.01,
-            rotation_threshold=0.1,
             n_substeps=20,
             relative_control=False,
-            ignore_z_target_rotation=False,
             target_obj_name="random",
+            sim_pre_run=10,
+            random_init_pos="random",
+            random_init_rot="random_z",
+            random_pos_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
+            initial_qpos=None,
+            distance_threshold=0.01,
             **kwargs,
     ):
+        ## set action
         self.relative_control = relative_control
 
+        ## init and set environment
         self.target_obj_name = generate_target_object(target_obj_name)
 
-        self.target_position = target_position
-        self.target_rotation = target_rotation
-        self.target_position_range = target_position_range
-        self.parallel_quats = [
+        self.random_init_pos = False
+        self.random_init_rot = False
+        if random_init_pos is not None:
+            assert random_init_pos in ["random", "fixed"]
+            self.random_init_pos = random_init_pos
+        if random_init_rot is not None:
+            assert random_init_rot in ["random_z", "fixed"]
+            self.random_init_rot = random_init_rot
+
+        self.random_pos_range = random_pos_range
+        self.random_quats_right = [
             rotations.euler2quat(r) for r in rotations.get_parallel_rotations()
         ]
-        self.random_init_rot = random_init_rot
-        self.randomize_initial_position = random_init_pos
-        self.distance_threshold = distance_threshold
-        self.rotation_threshold = rotation_threshold
-        self.reward_type = reward_type
-        self.ignore_z_target_rotation = ignore_z_target_rotation
 
-        assert self.target_position in ["ignore", "fixed", "random"]
-        assert self.target_rotation in ["ignore", "fixed", "xyz", "z", "parallel"]
         initial_qpos = initial_qpos or {}
+
+        self.sim_pre_run = sim_pre_run
+
+        ## compute reward
+        self.distance_threshold = distance_threshold
 
         super().__init__(
             model_path=GRASP_OBJECT_ENV_XML,
             n_substeps=n_substeps,
-            initial_qpos=initial_qpos,
-            # relative_control=relative_control,
             default_camera_config=DEFAULT_CAMERA_CONFIG,
-            n_actions=20,
+            n_actions=26,
+            initial_qpos=initial_qpos,
             **kwargs,
         )
-        EzPickle.__init__(self, target_position, target_rotation, reward_type, **kwargs)
-
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(26,), dtype="float32")
+        EzPickle.__init__(self, n_substeps, relative_control, target_obj_name, random_init_pos, random_init_rot,
+                          random_pos_range, distance_threshold, **kwargs)
 
     def _set_action(self, action):
-        # if action.shape[0] == 20:
-        #     action = np.concatenate([action, np.zeros(6)])
-        # hand_action, forearm_action = np.split(action, [20]) <- forearm_action should be at last
-
         ctrl_range = self.model.actuator_ctrlrange  # (26, 2)
         actuation_range = (ctrl_range[:, 1] - ctrl_range[:, 0]) / 2.0
 
@@ -190,14 +188,23 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         assert initial_quat.shape == (4,)
         initial_qpos = None
 
+        # Randomize initial position.
+        if self.random_init_pos == "random":
+            initial_pos += self.np_random.normal(size=3, scale=0.005)
+        elif not self.random_init_pos:
+            pass
+        else:
+            raise error.Error(
+                f'Unknown target_rotation option "{self.random_init_pos}".'
+            )
+
         # Randomization initial rotation.
-        if self.random_init_rot == "z":
-            angle = self.np_random.uniform(-np.pi/3, np.pi/3)  # todo this is changed to be easier
+        if self.random_init_rot == "random_z":
+            angle = self.np_random.uniform(-np.pi / 3, np.pi / 3)  # note this is changed to be easier
             self.scissors_angle = angle
             axis = np.array([0.0, 0.0, 1.0])
             offset_quat = quat_from_angle_and_axis(angle, axis)
             initial_quat = rotations.quat_mul(initial_quat, offset_quat)
-
             # elif self.target_rotation == "parallel":
             #     angle = self.np_random.uniform(-np.pi, np.pi)
             #     axis = np.array([0.0, 0.0, 1.0])
@@ -218,13 +225,8 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
             pass
         else:
             raise error.Error(
-                f'Unknown target_rotation option "{self.target_rotation}".'
+                f'Unknown target_rotation option "{self.random_init_rot}".'
             )
-
-        # Randomize initial position.
-        if self.randomize_initial_position:
-            if self.target_position != "fixed":
-                initial_pos += self.np_random.normal(size=3, scale=0.005)
 
         initial_quat /= np.linalg.norm(initial_quat)
         initial_qpos = np.concatenate([initial_pos, initial_quat])
@@ -240,7 +242,7 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
             return is_on_palm
 
         # Run the simulation for a bunch of timesteps to let everything settle in.
-        for _ in range(1):
+        for _ in range(self.sim_pre_run):
             self._set_action(np.zeros(self.action_space.shape))
             try:
                 self._mujoco.mj_step(self.model, self.data, nstep=self.n_substeps)
@@ -261,61 +263,6 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         return np.array(site_pos)
 
     def _sample_goal(self):
-        # Select a goal for the object position.
-        # target_pos = None
-        # if self.target_position == "random":
-        #     assert self.target_position_range.shape == (3, 2)
-        #     offset = self.np_random.uniform(
-        #         self.target_position_range[:, 0], self.target_position_range[:, 1]
-        #     )
-        #     assert offset.shape == (3,)
-        #     target_pos = (
-        #         self._utils.get_joint_qpos(self.model, self.data, "target:joint")[:3]
-        #         + offset
-        #     )
-        # elif self.target_position in ["ignore", "fixed"]:
-        #     target_pos = self._utils.get_joint_qpos(
-        #         self.model, self.data, "target:joint"
-        #     )[:3]
-        # else:
-        #     raise error.Error(
-        #         f'Unknown target_position option "{self.target_position}".'
-        #     )
-        # assert target_pos is not None
-        # assert target_pos.shape == (3,)
-        #
-        # # Select a goal for the object rotation.
-        # target_quat = None
-        # if self.target_rotation == "z":
-        #     angle = self.np_random.uniform(-np.pi, np.pi)
-        #     axis = np.array([0.0, 0.0, 1.0])
-        #     target_quat = quat_from_angle_and_axis(angle, axis)
-
-        # elif self.target_rotation == "parallel":
-        #     angle = self.np_random.uniform(-np.pi, np.pi)
-        #     axis = np.array([0.0, 0.0, 1.0])
-        #     target_quat = quat_from_angle_and_axis(angle, axis)
-        #     parallel_quat = self.parallel_quats[
-        #         self.np_random.integers(len(self.parallel_quats))
-        #     ]
-        #     target_quat = rotations.quat_mul(target_quat, parallel_quat)
-        # elif self.target_rotation == "xyz":
-        #     angle = self.np_random.uniform(-np.pi, np.pi)
-        #     axis = self.np_random.uniform(-1.0, 1.0, size=3)
-        #     target_quat = quat_from_angle_and_axis(angle, axis)
-        # elif self.target_rotation in ["ignore", "fixed"]:
-        #     target_quat = self.data.get_joint_qpos("target:joint")
-        # else:
-        #     raise error.Error(
-        #         f'Unknown target_rotation option "{self.target_rotation}".'
-        #     )
-
-        # assert target_quat is not None
-        # assert target_quat.shape == (4,)
-
-        # target_quat /= np.linalg.norm(target_quat)  # normalized quaternion
-        # goal = np.concatenate([target_pos, target_quat])
-
         goal = self.__get_site_pos(["target:center", "target:hole0", "target:hole1"])
         return goal
 
@@ -325,29 +272,12 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         # goal = self.goal.copy()
         # assert goal.shape == (7,)
         # if self.target_position == "ignore":
-            # Move the object to the side since we do not care about it's position.
-            # goal[0] += 0.15
-
-        # to be deprecated
-        # self._utils.set_joint_qpos(self.model, self.data, "target:joint", np.array([1.2999224 , 0.75466746 ,0.8,        0.92803925, 0.,         0. ,0.37248241]))
-        # self._utils.set_joint_qvel(self.model, self.data, "target:joint", np.zeros(6))
-
-        # to be deprecated
-        # if "object_hidden" in self._model_names.geom_names:
-        #     hidden_id = self._model_names.geom_name2id["object_hidden"]
-        #     self.model.geom_rgba[hidden_id, 3] = 1.0
+        # Move the object to the side since we do not care about it's position.
+        # goal[0] += 0.15
 
         self._mujoco.mj_forward(self.model, self.data)
 
     def _get_achieved_goal(self):
-        # todo fix achieved goal to the finger's info
-        # object_qpos = self._utils.get_joint_qpos(self.model, self.data, "target:joint")
-        # assert object_qpos.shape == (7,)
-        # return object_qpos
-
-        # fingers_qpos, _ = self._utils.robot_get_obs(
-        #     self.model, self.data, ["robot0:FFJ0", "robot0:MFJ0", "robot0:THJ0"]
-        # )
         return self.__get_site_pos(["robot0:ff_pos_r", "robot0:mf_pos_r", "robot0:thumb_pos_r"])
 
     def _get_obs(self):
@@ -371,10 +301,6 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         }
 
     def _is_success(self, achieved_goal, desired_goal):
-        # d_pos, d_rot = self._goal_distance(achieved_goal, desired_goal)
-        # achieved_pos = (d_pos < self.distance_threshold).astype(np.float32)
-        # achieved_rot = (d_rot < self.rotation_threshold).astype(np.float32)
-        # achieved_both = achieved_pos * achieved_rot
         desired_goal = desired_goal.ravel()
         ff_d = compute_pos_distance(achieved_goal[:3], desired_goal[3:6])
         mf_d = compute_pos_distance(achieved_goal[3:6], desired_goal[3:6])
@@ -386,15 +312,6 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         is_scissors_above = (self.__get_site_pos(["target:center"]).ravel()[2] - desired_goal[2]
                              > 0.05)
         return {"is_in_hold": is_in_hold, "is_scissors_above": is_scissors_above}
-
-    def __is_out_of_bound(self):
-        hand_pos = self.__get_site_pos(["robot0:is_out_of_bound"]).ravel()
-        # print(hand_pos)
-        return ((hand_pos[0] < 0.4 or hand_pos[0] > 1.65) or
-                (hand_pos[1] < 0.05 or hand_pos[1] > 1.45))
-
-    def __is_scissors_dropped(self):
-        return self.goal[0, 2] - self.__get_site_pos(["target:center"]).ravel()[2] > 0.1
 
     def compute_reward(self, achieved_goal, goal, info):
         # _reward = super().compute_reward(achieved_goal, goal, info)
@@ -416,6 +333,15 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         """All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time."""
         return self.__is_out_of_bound() or self.__is_scissors_dropped()
 
-    def compute_truncated(self, achievec_goal, desired_goal, info):
+    def compute_truncated(self, achieved_goal, desired_goal, info):
         """The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper."""
         return False
+
+    def __is_out_of_bound(self):
+        hand_pos = self.__get_site_pos(["robot0:is_out_of_bound"]).ravel()
+        # print(hand_pos)
+        return ((hand_pos[0] < 0.4 or hand_pos[0] > 1.65) or
+                (hand_pos[1] < 0.05 or hand_pos[1] > 1.45))
+
+    def __is_scissors_dropped(self):
+        return self.goal[0, 2] - self.__get_site_pos(["target:center"]).ravel()[2] > 0.1

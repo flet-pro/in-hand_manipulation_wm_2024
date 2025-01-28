@@ -221,7 +221,7 @@ class BaseRobotEnv(GoalEnv):
         """All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time."""
         return False
 
-    def compute_truncated(self, achievec_goal, desired_goal, info):
+    def compute_truncated(self, achieved_goal, desired_goal, info):
         """The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper."""
         return False
 
@@ -445,110 +445,3 @@ class MujocoRobotEnv(BaseRobotEnv):
 
     def _mujoco_step(self, action):
         self._mujoco.mj_step(self.model, self.data, nstep=self.n_substeps)
-
-
-class MujocoPyRobotEnv(BaseRobotEnv):
-    """Robot base class for fetch and hand environment versions that depend on mujoco_py bindings."""
-
-    def __init__(self, **kwargs):
-        """Initialize mujoco_py environment.
-
-        The mujoco_py bindings are initialized along the respective mujoco_py_utils.
-
-        Note: Environments that depend on mujoco_py are no longer maintained, thus a warning is created to notify the user to
-        bump the environment to the latest version
-
-        Raises:
-            error.DependencyNotInstalled: if mujoco_py bindings are not installed. Install with `pip install gymnasium-robotics[mujoco-py]`
-        """
-        if MUJOCO_PY_IMPORT_ERROR is not None:
-            raise error.DependencyNotInstalled(
-                f"{MUJOCO_PY_IMPORT_ERROR}. (HINT: you need to install mujoco_py, and also perform the setup instructions here: https://github.com/openai/mujoco-py/.)"
-            )
-        self._mujoco_py = mujoco_py
-        self._utils = mujoco_py_utils
-
-        self.viewer = None
-        self._viewers = {}
-
-        logger.warn(
-            "This version of the mujoco environments depends "
-            "on the mujoco-py bindings, which are no longer maintained "
-            "and may stop working. Please upgrade to the v4 versions of "
-            "the environments (which depend on the mujoco python bindings instead), unless "
-            "you are trying to precisely replicate previous works)."
-        )
-
-        super().__init__(**kwargs)
-
-    def _initialize_simulation(self):
-        self.model = self._mujoco_py.load_model_from_path(self.fullpath)
-        self.sim = self._mujoco_py.MjSim(self.model, nsubsteps=self.n_substeps)
-        self.data = self.sim.data
-
-        self._env_setup(initial_qpos=self.initial_qpos)
-        self.initial_state = copy.deepcopy(self.sim.get_state())
-
-    def _reset_sim(self):
-        self.sim.set_state(self.initial_state)
-        self.sim.forward()
-        return super()._reset_sim()
-
-    def render(self):
-        """Render a frame of the MuJoCo simulation.
-
-        Returns:
-            rgb image (np.ndarray): if render_mode is "rgb_array", return a 3D image array.
-        """
-        width, height = self.width, self.height
-        assert self.render_mode in self.metadata["render_modes"]
-        self._render_callback()
-        if self.render_mode in {
-            "rgb_array",
-        }:
-            self._get_viewer(self.render_mode).render(width, height)
-            # window size used for old mujoco-py:
-            data = self._get_viewer(self.render_mode).read_pixels(
-                width, height, depth=False
-            )
-            # original image is upside-down, so flip it
-            return data[::-1, :, :]
-        elif self.render_mode == "human":
-            self._get_viewer(self.render_mode).render()
-
-    def close(self):
-        """Close contains the code necessary to "clean up" the environment.
-
-        Terminates any existing mujoco_py rendering windows, MjViewer or MjRenderContextOffscreen.
-        """
-        if self.viewer is not None:
-            self.viewer = None
-            self._viewers = {}
-
-    def _get_viewer(
-            self, mode
-    ) -> Union["mujoco_py.MjViewer", "mujoco_py.MjRenderContextOffscreen"]:
-        self.viewer = self._viewers.get(mode)
-        if self.viewer is None:
-            if mode == "human":
-                self.viewer = self._mujoco_py.MjViewer(self.sim)
-
-            elif mode in {
-                "rgb_array",
-            }:
-                self.viewer = self._mujoco_py.MjRenderContextOffscreen(self.sim, -1)
-            self._viewer_setup()
-            self._viewers[mode] = self.viewer
-        return self.viewer
-
-    @property
-    def dt(self):
-        """Return the timestep of each Gymanisum step."""
-        return self.sim.model.opt.timestep * self.sim.nsubsteps
-
-    def _mujoco_step(self, action):
-        self.sim.step()
-
-    def _viewer_setup(self):
-        """Initial configuration of the viewer. Can be used to set the camera position, for example."""
-        pass
