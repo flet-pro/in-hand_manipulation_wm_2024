@@ -11,6 +11,14 @@ import cv2
 from tqdm.notebook import tqdm
 import wandb
 
+import torch
+import torch.distributions as td
+from torch.distributions import Normal, Categorical, OneHotCategorical, OneHotCategoricalStraightThrough
+from torch.distributions.kl import kl_divergence
+from torch import nn
+from torch.nn import functional as F
+from torch.nn.utils import clip_grad_norm_
+
 import gymnasium as gym
 import gymnasium_robotics
 
@@ -22,14 +30,11 @@ from models.dreamerv2 import (
     RSSM,
     RewardModel,
     DiscountModel,
+    Critic,
     preprocess_obs,
     calculate_lambda_target,
 )
 from models.wrapper import GymWrapper, RepeatAction
-
-
-
-
 
 ENV_NAME = 'HandManipulateBoxRotate_BooleanTouchSensorsDense-v1'
 
@@ -72,6 +77,58 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    
+# モデルパラメータをGoogleDriveに保存・後で読み込みするためのヘルパークラス
+class TrainedModels:
+    def __init__(self, *models) -> None:
+        """
+        コンストラクタ．
+
+        Parameters
+        ----------
+        models : nn.Module
+            保存するモデル．複数モデルを渡すことができます．
+
+        使用例: trained_models = TraindModels(encoder, rssm, value_model, action_model)
+        """
+        assert np.all([nn.Module in model.__class__.__bases__ for model in models]), "Arguments for TrainedModels need to be nn models."
+
+        self.models = models
+
+    def save(self, dir: str) -> None:
+        """
+        initで渡したモデルのパラメータを保存します．
+        パラメータのファイル名は01.pt, 02.pt, ... のように連番になっています．
+
+        Parameters
+        ----------
+        dir : str
+            パラメータの保存先．
+        """
+        for i, model in enumerate(self.models):
+            torch.save(
+                model.state_dict(),
+                os.path.join(dir, f"{str(i + 1).zfill(2)}.pt")
+            )
+
+    def load(self, dir: str, device: str) -> None:
+        """
+        initで渡したモデルのパラメータを読み込みます．
+
+        Parameters
+        ----------
+        dir : str
+            パラメータの保存先．
+        device : str
+            モデルをどのデバイス(CPU or GPU)に載せるかの設定．
+        """
+        for i, model in enumerate(self.models):
+            model.load_state_dict(
+                torch.load(
+                    os.path.join(dir, f"{str(i + 1).zfill(2)}.pt"),
+                    map_location=device
+                )
+            )
 
 class Config:
     def __init__(self, **kwargs):
@@ -116,29 +173,260 @@ class Config:
 
 if __name__ == "__main__":
     cfg = Config()
-    env = make_env()
+    # モデル等の初期化
+    seed = 0
+    NUM_ITER = 100_000  # 環境とのインタラクション回数の制限 ※変更しないでください
+    set_seed(seed)
+    env = make_env(max_steps=NUM_ITER)
+    eval_env = make_env(seed=1234, max_steps=None)  # omnicampus上の環境と同じシード値で評価環境を作成
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    obs, obs_hand = env.reset()
+    action_dim = env.action_space.n
+    # リプレイバッファ
+    replay_buffer = ReplayBuffer(
+        capacity=cfg.buffer_size,
+        observation_shape=(64, 64, 1),
+        action_dim=env.action_space.n
+    )
 
-    imgs = []
-    fig = plt.figure()
+    # モデル
+    rssm = RSSM(cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes, action_dim).to(device)
+    encoder = Encoder().to(device)
+    decoder = Decoder(cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    reward_model =  RewardModel(cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    discount_model = DiscountModel(cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    actor = Actor(action_dim, cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    critic = Critic(cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    target_critic = Critic(cfg.mlp_hidden_dim, cfg.rnn_hidden_dim, cfg.state_dim, cfg.num_classes).to(device)
+    target_critic.load_state_dict(critic.state_dict())
 
-    for _ in range(30):
-        action = env.action_space.sample()  # User-defined policy function
-        action[:] = 0
-        # action[22] = 0
+    trained_models = TrainedModels(
+        rssm,
+        encoder,
+        decoder,
+        reward_model,
+        discount_model,
+        actor,
+        critic
+    )
 
-        obs, reward, terminated, truncated, info = env.step(action)
+    # optimizer
+    wm_params = list(rssm.parameters())         + \
+                list(encoder.parameters())      + \
+                list(decoder.parameters())      + \
+                list(reward_model.parameters()) + \
+                list(discount_model.parameters())
 
-        # print(obs.shape)
-        # print(obs_hand.shape)
-        # print(terminated)
-        # print(reward)
+    wm_optimizer = torch.optim.AdamW(wm_params, lr=cfg.model_lr, eps=cfg.epsilon, weight_decay=cfg.weight_decay)
+    actor_optimizer = torch.optim.AdamW(actor.parameters(), lr=cfg.actor_lr, eps=cfg.epsilon, weight_decay=cfg.weight_decay)
+    critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=cfg.critic_lr, eps=cfg.epsilon, weight_decay=cfg.weight_decay)
+    
+    # 学習を行う
+    # 環境と相互作用 → 一定イテレーションでモデル更新を繰り返す
+    policy = Agent(encoder, rssm, actor)
 
-        img = env.render()
-        im = plt.imshow(img, animated=True)
-        imgs.append([im])
+    # 環境，収益等の初期化
+    obs = env.reset()
+    done = False
+    total_reward = 0
+    total_episode = 1
+    best_reward = -1
 
-    ani = ArtistAnimation(fig, imgs, interval=100, blit=True, repeat=False)
-    ani.save('videos/anim.mp4', writer="ffmpeg")
-    plt.show()
+    for iteration in range(NUM_ITER - cfg.seed_iter):
+        with torch.no_grad():
+            # 環境と相互作用
+            action = policy(obs)  # モデルで行動をサンプリング(one-hot)
+            action_int = np.argmax(action)  # 環境に渡すときはint型
+            next_obs, reward, done, _ = env.step(action_int)  # 環境を進める
+
+            # 得たデータをリプレイバッファに追加して更新
+            replay_buffer.push(preprocess_obs(obs), action, np.tanh(reward), done)  # x_t, a_t, r_t, gamma_t
+            obs = next_obs
+            total_reward += reward
+
+        if (iteration + 1) % cfg.update_freq == 0:
+            # モデルの学習
+            # リプレイバッファからデータをサンプリングする
+            # (batch size, seq_lenght, *data shape)
+            observations, actions, rewards, done_flags =\
+                replay_buffer.sample(cfg.batch_size, cfg.seq_length)
+            done_flags = 1 - done_flags  # 終端でない場合に1をとる
+
+            # torchで扱える形（seq lengthを最初の次元に，画像はchnnelを最初の次元にする）に変形，observationの前処理
+            observations = torch.permute(torch.as_tensor(observations, device=device), (1, 0, 4, 2, 3))  # (T, B, C, H, W)
+            actions = torch.as_tensor(actions, device=device).transpose(0, 1)  # (T, B, action dim)
+            rewards = torch.as_tensor(rewards, device=device).transpose(0, 1)  # (T, B, 1)
+            done_flags = torch.as_tensor(done_flags, device=device).transpose(0, 1).float()  # (T, B, 1)
+
+            # =================
+            # world modelの学習
+            # =================
+            # 観測をベクトルに埋めこみ
+            emb_observations = encoder(observations.reshape(-1, 1, 64, 64)).view(cfg.seq_length, cfg.batch_size, -1)  # (T, B, 1536)
+
+            # 状態表現z，行動aはゼロで初期化
+            # バッファから取り出したデータをt={1, ..., seq length}とするなら，以下はz_1とみなせる
+            state = torch.zeros(cfg.batch_size, cfg.state_dim*cfg.num_classes, device=device)
+            rnn_hidden = torch.zeros(cfg.batch_size, cfg.rnn_hidden_dim, device=device)
+
+            # 各観測に対して状態表現を計算
+            # タイムステップごとに計算するため，先に格納するTensorを定義する(t={1, ..., seq length})
+            states = torch.zeros(cfg.seq_length, cfg.batch_size, cfg.state_dim*cfg.num_classes, device=device)
+            rnn_hiddens = torch.zeros(cfg.seq_length, cfg.batch_size, cfg.rnn_hidden_dim, device=device)
+
+            # prior, posteriorを計算してKL lossを計算する
+            kl_loss = 0
+            for i in range(cfg.seq_length-1):
+                # rnn hiddenを更新
+                rnn_hidden = rssm.recurrent(state, actions[i], rnn_hidden)  # h_t+1
+
+                # prior, posteriorを計算
+                next_state_prior, next_detach_prior = rssm.get_prior(rnn_hidden, detach=True) # \hat{z}_t+1
+                next_state_posterior, next_detach_posterior = rssm.get_posterior(rnn_hidden, emb_observations[i+1], detach=True)  # z_t+1
+
+                # posteriorからzをサンプリング
+                state = next_state_posterior.rsample().flatten(1)
+                rnn_hiddens[i+1] = rnn_hidden  # h_t+1
+                states[i+1] = state  # z_t+1
+
+                # KL lossを計算
+                kl_loss +=  cfg.kl_balance * torch.mean(kl_divergence(next_detach_posterior, next_state_prior)) + \
+                            (1 - cfg.kl_balance) * torch.mean(kl_divergence(next_state_posterior, next_detach_prior))
+            kl_loss /= (cfg.seq_length - 1)
+
+            # 初期状態は使わない
+            rnn_hiddens = rnn_hiddens[1:]  # (seq lenghth - 1, batch size rnn hidden)
+            states = states[1:]  # (seq length - 1, batch size, state dim * num_classes)
+
+            # 得られた状態を利用して再構成，報酬，終端フラグを予測
+            # そのままでは時間方向，バッチ方向で次元が多いため平坦化
+            flatten_rnn_hiddens = rnn_hiddens.view(-1, cfg.rnn_hidden_dim)  # ((T-1) * B, rnn hidden)
+            flatten_states = states.view(-1, cfg.state_dim * cfg.num_classes)  # ((T-1) * B, state_dim * num_classes)
+
+            # 上から再構成，報酬，終端フラグ予測
+            obs_dist = decoder(flatten_states, flatten_rnn_hiddens)  # (T * B, 3, 64, 64)
+            reward_dist = reward_model(flatten_states, flatten_rnn_hiddens)  # (T * B, 1)
+            discount_dist = discount_model(flatten_states, flatten_rnn_hiddens)  # (T * B, 1)
+
+            # 各予測に対する損失の計算（対数尤度）
+            C, H, W = observations.shape[2:]
+            obs_loss = -torch.mean(obs_dist.log_prob(observations[1:].reshape(-1, C, H, W)))
+            reward_loss = -torch.mean(reward_dist.log_prob(rewards[:-1].reshape(-1, 1)))
+            discount_loss = -torch.mean(discount_dist.log_prob(done_flags[:-1].float().reshape(-1, 1)))
+
+            # 総和をとってモデルを更新
+            wm_loss = obs_loss + cfg.reward_loss_scale * reward_loss + cfg.discount_loss_scale * discount_loss + cfg.kl_scale * kl_loss
+
+            wm_optimizer.zero_grad()
+            wm_loss.backward()
+            clip_grad_norm_(wm_params, cfg.gradient_clipping)
+            wm_optimizer.step()
+
+            #====================
+            # Actor, Criticの更新
+            #===================
+            # wmから得た状態の勾配を切っておく
+            flatten_rnn_hiddens = flatten_rnn_hiddens.detach()
+            flatten_states = flatten_states.detach()
+
+            # priorを用いた状態予測
+            # 格納する空のTensorを用意
+            imagined_states = torch.zeros(cfg.imagination_horizon + 1,
+                                        *flatten_states.shape,
+                                        device=flatten_states.device)
+            imagined_rnn_hiddens = torch.zeros(cfg.imagination_horizon + 1,
+                                            *flatten_rnn_hiddens.shape,
+                                            device=flatten_rnn_hiddens.device)
+            imagined_action_log_probs = torch.zeros((cfg.imagination_horizon, cfg.batch_size * (cfg.seq_length-1)),
+                                                    device=flatten_rnn_hiddens.device)
+            imagined_action_entropys = torch.zeros((cfg.imagination_horizon, cfg.batch_size * (cfg.seq_length-1)),
+                                                    device=flatten_rnn_hiddens.device)
+
+            # 未来予測をして想像上の軌道を作る前に, 最初の状態としては先ほどモデルの更新で使っていた
+            # リプレイバッファからサンプルされた観測データを取り込んだ上で推論した状態表現を使う
+            imagined_states[0] = flatten_states
+            imagined_rnn_hiddens[0] = flatten_rnn_hiddens
+
+            # open-loopで予測
+            for i in range(1, cfg.imagination_horizon + 1):
+                actions, action_log_probs, action_entropys = actor(flatten_states.detach(), flatten_rnn_hiddens.detach())  # ((T-1) * B, action dim)
+
+                # rnn hiddenを更新, priorで次の状態を予測
+                with torch.no_grad():
+                    flatten_rnn_hiddens = rssm.recurrent(flatten_states, actions, flatten_rnn_hiddens)  # h_t+1
+                    flatten_states_prior = rssm.get_prior(flatten_rnn_hiddens)
+                    flatten_states = flatten_states_prior.rsample().flatten(1)
+
+                imagined_rnn_hiddens[i] = flatten_rnn_hiddens.detach()
+                imagined_states[i] = flatten_states.detach()
+                imagined_action_log_probs[i-1] = action_log_probs
+                imagined_action_entropys[i-1] = action_entropys
+
+            imagined_states = imagined_states[1:]
+            imagined_rnn_hiddens = imagined_rnn_hiddens[1:]
+
+            # 得られた状態から報酬を予測
+            flatten_imagined_states = imagined_states.view(-1, cfg.state_dim * cfg.num_classes).detach()  # ((imagination horizon) * (T-1) * B, state dim * num classes)
+            flatten_imagined_rnn_hiddens = imagined_rnn_hiddens.view(-1, cfg.rnn_hidden_dim).detach()  # ((imagination horizon) * (T-1) * B, rnn hidden)
+
+            # reward, done_flagsは分布なので平均値をとる
+            # ((imagination horizon + 1), (T-1) * B)
+            with torch.no_grad():
+                imagined_rewards = reward_model(flatten_imagined_states, flatten_imagined_rnn_hiddens).mean.view(cfg.imagination_horizon, -1)
+                target_values = target_critic(flatten_imagined_states, flatten_imagined_rnn_hiddens).view(cfg.imagination_horizon, -1)
+                imagined_done_flags = discount_model(flatten_imagined_states, flatten_imagined_rnn_hiddens).base_dist.probs.view(cfg.imagination_horizon, -1)
+                discount_arr = cfg.discount * torch.round(imagined_done_flags)
+
+            # lambda targetの計算
+            lambda_target = calculate_lambda_target(imagined_rewards, discount_arr, target_values, cfg.lambda_)
+
+            # actorの損失を計算
+            objective = imagined_action_log_probs * ((lambda_target - target_values).detach())
+            discount_arr = torch.cat([torch.ones_like(discount_arr[:1]), discount_arr[1:]])
+            discount = torch.cumprod(discount_arr, 0)
+            actor_loss = -torch.sum(torch.mean(discount * (objective + cfg.actor_entropy_scale * imagined_action_entropys), dim=1))
+
+            actor_optimizer.zero_grad()
+            actor_loss.backward()
+            clip_grad_norm_(actor.parameters(), cfg.gradient_clipping)
+            actor_optimizer.step()
+
+            # criticの損失を計算
+            value_mean = critic(flatten_imagined_states.detach(), flatten_imagined_rnn_hiddens.detach()).view(cfg.imagination_horizon, -1)
+            value_dist = td.Independent(td.Normal(value_mean, 1),  1)
+            critic_loss = -torch.mean(discount.detach() * value_dist.log_prob(lambda_target.detach()).unsqueeze(-1))
+
+            critic_optimizer.zero_grad()
+            critic_loss.backward()
+            clip_grad_norm_(critic.parameters(), cfg.gradient_clipping)
+            critic_optimizer.step()
+
+        if (iteration + 1) % cfg.slow_critic_update == 0:
+            target_critic.load_state_dict(critic.state_dict())
+
+        # エピソードが終了した時に再初期化
+        if done:
+            print(f"episode: {total_episode} total_reward: {total_reward:.8f}")
+            print(f"num iter: {iteration} kl loss: {kl_loss.item():.8f} obs loss: {obs_loss.item():.8f} "
+                f"rewrd loss: {reward_loss.item():.8f} discount loss: {discount_loss.item():.8f} "
+                f"critic loss: {critic_loss.item():.8f} actor loss: {actor_loss.item():.8f}"
+            )
+            obs = env.reset()
+            done = False
+            total_reward = 0
+            total_episode += 1
+            policy.reset()
+
+            # 一定エピソードごとに評価
+            if total_episode % cfg.eval_freq == 0:
+                eval_reward = evaluation(eval_env, policy, iteration, cfg)
+                trained_models.save("./")
+                if eval_reward > best_reward:
+                    best_reward = eval_reward
+                    os.makedirs("./best_models", exist_ok=True)
+                    trained_models.save("./best_models")
+
+                eval_env.reset()
+                policy.reset()
+
+    trained_models.save("./")

@@ -6,6 +6,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils import clip_grad_norm_
 
+from models.dreamerv2.utils import preprocess_obs
+
 class Encoder(nn.Module):
     def __init__(self):
         super().__init__()
