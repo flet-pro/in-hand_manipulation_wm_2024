@@ -2,12 +2,12 @@ import numpy as np
 from gymnasium import spaces, error
 from gymnasium.utils import EzPickle
 
-from gymnasium_robotics.envs.shadow_dexterous_hand import MujocoManipulateEnv, MujocoHandEnv
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
 from envs.config import GRASP_OBJECT_ENV_XML, DEFAULT_CAMERA_CONFIG
 from envs.generate_target_object import generate_target_object
+from envs.robot_env import MujocoRobotEnv
 
 
 # ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
@@ -35,7 +35,7 @@ def compute_pos_distance(goal_a, goal_b):
     return d_pos
 
 
-class GraspObjectEnv(MujocoHandEnv, EzPickle):
+class GraspObjectEnv(MujocoRobotEnv, EzPickle):
     """
         ## Description
 
@@ -95,13 +95,13 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
 
     def __init__(
             self,
+            random_init_pos=True,
+            random_init_rot=True,
             target_position="random",
             target_rotation="z",
             reward_type="sparse",
             target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
             initial_qpos=None,
-            randomize_initial_position=True,
-            randomize_initial_rotation=True,
             distance_threshold=0.01,
             rotation_threshold=0.1,
             n_substeps=20,
@@ -110,6 +110,8 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
             target_obj_name="random",
             **kwargs,
     ):
+        self.relative_control = relative_control
+
         self.target_obj_name = generate_target_object(target_obj_name)
 
         self.target_position = target_position
@@ -118,8 +120,8 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
         self.parallel_quats = [
             rotations.euler2quat(r) for r in rotations.get_parallel_rotations()
         ]
-        self.randomize_initial_rotation = randomize_initial_rotation
-        self.randomize_initial_position = randomize_initial_position
+        self.randomize_initial_rotation = random_init_rot
+        self.randomize_initial_position = random_init_pos
         self.distance_threshold = distance_threshold
         self.rotation_threshold = rotation_threshold
         self.reward_type = reward_type
@@ -133,8 +135,9 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
             model_path=GRASP_OBJECT_ENV_XML,
             n_substeps=n_substeps,
             initial_qpos=initial_qpos,
-            relative_control=relative_control,
+            # relative_control=relative_control,
             default_camera_config=DEFAULT_CAMERA_CONFIG,
+            n_actions=20,
             **kwargs,
         )
         EzPickle.__init__(self, target_position, target_rotation, reward_type, **kwargs)
@@ -142,8 +145,8 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
         self.action_space = spaces.Box(-1.0, 1.0, shape=(26,), dtype="float32")
 
     def _set_action(self, action):
-        if action.shape[0] == 20:
-            action = np.concatenate([action, np.zeros(6)])
+        # if action.shape[0] == 20:
+        #     action = np.concatenate([action, np.zeros(6)])
         # hand_action, forearm_action = np.split(action, [20]) <- forearm_action should be at last
 
         ctrl_range = self.model.actuator_ctrlrange  # (26, 2)
@@ -223,7 +226,6 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
         if self.randomize_initial_position:
             if self.target_position != "fixed":
                 initial_pos += self.np_random.normal(size=3, scale=0.005)
-                # initial_pos[2] = 0.8
 
         initial_quat /= np.linalg.norm(initial_quat)
         initial_qpos = np.concatenate([initial_pos, initial_quat])
@@ -240,7 +242,7 @@ class GraspObjectEnv(MujocoHandEnv, EzPickle):
 
         # Run the simulation for a bunch of timesteps to let everything settle in.
         for _ in range(1):
-            self._set_action(np.zeros(20))
+            self._set_action(np.zeros(self.action_space.shape))
             try:
                 self._mujoco.mj_step(self.model, self.data, nstep=self.n_substeps)
             except Exception:
