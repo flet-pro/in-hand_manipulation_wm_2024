@@ -95,10 +95,8 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
 
     def __init__(
             self,
-            random_init_pos=True,
-            random_init_rot=True,
-            target_position="random",
-            target_rotation="z",
+            random_init_pos="random",
+            random_init_rot="z",
             reward_type="sparse",
             target_position_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
             initial_qpos=None,
@@ -120,7 +118,7 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         self.parallel_quats = [
             rotations.euler2quat(r) for r in rotations.get_parallel_rotations()
         ]
-        self.randomize_initial_rotation = random_init_rot
+        self.random_init_rot = random_init_rot
         self.randomize_initial_position = random_init_pos
         self.distance_threshold = distance_threshold
         self.rotation_threshold = rotation_threshold
@@ -193,34 +191,35 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         initial_qpos = None
 
         # Randomization initial rotation.
-        if self.randomize_initial_rotation:
-            if self.target_rotation == "z":
-                angle = self.np_random.uniform(-np.pi/3, np.pi/3)  # todo this is changed to be easier
-                self.scissors_angle = angle
-                axis = np.array([0.0, 0.0, 1.0])
-                offset_quat = quat_from_angle_and_axis(angle, axis)
-                initial_quat = rotations.quat_mul(initial_quat, offset_quat)
+        if self.random_init_rot == "z":
+            angle = self.np_random.uniform(-np.pi/3, np.pi/3)  # todo this is changed to be easier
+            self.scissors_angle = angle
+            axis = np.array([0.0, 0.0, 1.0])
+            offset_quat = quat_from_angle_and_axis(angle, axis)
+            initial_quat = rotations.quat_mul(initial_quat, offset_quat)
 
-            elif self.target_rotation == "parallel":
-                angle = self.np_random.uniform(-np.pi, np.pi)
-                axis = np.array([0.0, 0.0, 1.0])
-                z_quat = quat_from_angle_and_axis(angle, axis)
-                parallel_quat = self.parallel_quats[
-                    self.np_random.integers(len(self.parallel_quats))
-                ]
-                offset_quat = rotations.quat_mul(z_quat, parallel_quat)
-                initial_quat = rotations.quat_mul(initial_quat, offset_quat)
-            elif self.target_rotation in ["xyz", "ignore"]:
-                angle = self.np_random.uniform(-np.pi, np.pi)
-                axis = self.np_random.uniform(-1.0, 1.0, size=3)
-                offset_quat = quat_from_angle_and_axis(angle, axis)
-                initial_quat = rotations.quat_mul(initial_quat, offset_quat)
-            elif self.target_rotation == "fixed":
-                pass
-            else:
-                raise error.Error(
-                    f'Unknown target_rotation option "{self.target_rotation}".'
-                )
+            # elif self.target_rotation == "parallel":
+            #     angle = self.np_random.uniform(-np.pi, np.pi)
+            #     axis = np.array([0.0, 0.0, 1.0])
+            #     z_quat = quat_from_angle_and_axis(angle, axis)
+            #     parallel_quat = self.parallel_quats[
+            #         self.np_random.integers(len(self.parallel_quats))
+            #     ]
+            #     offset_quat = rotations.quat_mul(z_quat, parallel_quat)
+            #     initial_quat = rotations.quat_mul(initial_quat, offset_quat)
+            # elif self.target_rotation in ["xyz", "ignore"]:
+            #     angle = self.np_random.uniform(-np.pi, np.pi)
+            #     axis = self.np_random.uniform(-1.0, 1.0, size=3)
+            #     offset_quat = quat_from_angle_and_axis(angle, axis)
+            #     initial_quat = rotations.quat_mul(initial_quat, offset_quat)
+            # elif self.target_rotation == "fixed":
+            #     pass
+        elif not self.random_init_rot:
+            pass
+        else:
+            raise error.Error(
+                f'Unknown target_rotation option "{self.target_rotation}".'
+            )
 
         # Randomize initial position.
         if self.randomize_initial_position:
