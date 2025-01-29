@@ -97,8 +97,9 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
             self,
             n_substeps=20,
             relative_control=False,
+            pre_train=True,
             target_obj_name="random",
-            sim_pre_run=10,
+            sim_pre_run=1,
             random_init_pos="random",
             random_init_rot="random_z",
             random_pos_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
@@ -110,7 +111,8 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         self.relative_control = relative_control
 
         ## init and set environment
-        self.target_obj_name = generate_target_object(target_obj_name)
+        self.pre_train = pre_train
+        self.target_obj_name = generate_target_object(target_obj_name, pre_train)
 
         self.random_init_pos = False
         self.random_init_rot = False

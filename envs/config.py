@@ -20,14 +20,18 @@ TARGET_OBJECT_STR = """
 """
 
 TARGET_OBJECT_DICT = {
-    "scissors":
-        '<geom name="target" euler="0 0 0" type="mesh" mesh="object:scissors" material="block_mat" condim="4" mass="1" />',
-    "block_box":
-        '<geom name="target" euler="0 0 0" type="box" size="0.035 0.035 0.035" material="block_mat" condim="4" mass="1" />',
-    "block_ball":
-        '<geom name="target" euler="0 0 0" type="sphere" size="0.035" material="block_mat" condim="4" mass="1" />',
-    "block_cylinder":
-        '<geom name="target" euler="0 0 0" type="cylinder" size="0.035 0.035" material="block_mat" condim="4" mass="1" />',
-    "block_capsule":
-        '<geom name="target" euler="0 0 0" type="capsule" size="0.025 0.035" material="block_mat" condim="4" mass="1" />'
+    "pre_train": {
+        "block_box":
+            '<geom name="target" euler="0 0 0" type="box" size="0.035 0.035 0.035" material="block_mat" condim="4" mass="1" />',
+        "block_ball":
+            '<geom name="target" euler="0 0 0" type="sphere" size="0.035" material="block_mat" condim="4" mass="1" />',
+        "block_cylinder":
+            '<geom name="target" euler="0 0 0" type="cylinder" size="0.035 0.035" material="block_mat" condim="4" mass="1" />',
+        "block_capsule":
+            '<geom name="target" euler="0 0 0" type="capsule" size="0.025 0.035" material="block_mat" condim="4" mass="1" />'
+    },
+    "tools": {
+        "scissors":
+            '<geom name="target" euler="0 0 0" type="mesh" mesh="object:scissors" material="block_mat" condim="4" mass="1" />',
+    },
 }
