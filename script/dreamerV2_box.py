@@ -118,9 +118,9 @@ def make_env(seed=None, max_steps=50) -> RepeatAction:
 
     # Dreamerでは観測は64x64のRGB画像
     env = CustomManipulateBoxEnv(env)
-    env = GymWrapper(
-        env, render_width=64, render_height=64
-    )
+    # env = GymWrapper(
+    #     env, render_width=64, render_height=64
+    # )
     env = RepeatAction(env, skip=4)  # DreamerではActionRepeatは2
     return env
 
