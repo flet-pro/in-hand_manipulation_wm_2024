@@ -16,6 +16,7 @@ class RSSM:
         state_dim: int,
         action_dim: int,
         rnn_hidden_dim: int,
+        obs_hand_dim: int,
         device: torch.device
     ) -> None:
         """
@@ -30,7 +31,7 @@ class RSSM:
         rnn_hidden_dim : int
             決定的状態hの次元数．
         """
-        self.transition = TransitionModel(state_dim, action_dim, rnn_hidden_dim).to(
+        self.transition = TransitionModel(state_dim, action_dim, rnn_hidden_dim, obs_hand_dim).to(
             device
         )
         self.observation = ObservationModel(
