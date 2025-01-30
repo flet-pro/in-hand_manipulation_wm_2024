@@ -52,13 +52,14 @@ class TransitionModel(nn.Module):
     """
 
     def __init__(
-            self,
-            state_dim: int,
-            action_dim: int,
-            rnn_hidden_dim: int,
-            hidden_dim: int = 200,
-            min_stddev: float = 0.1,
-            act: "function" = F.elu,
+        self,
+        state_dim: int,
+        action_dim: int,
+        rnn_hidden_dim: int,
+        obs_hand_dim: int,
+        hidden_dim: int = 200,
+        min_stddev: float = 0.1,
+        act: "function" = F.elu,
     ) -> None:
         """
         コンストラクタ．
@@ -87,7 +88,7 @@ class TransitionModel(nn.Module):
         self.fc_rnn_hidden = nn.Linear(rnn_hidden_dim, hidden_dim)
         self.fc_state_mean_prior = nn.Linear(hidden_dim, state_dim)
         self.fc_state_stddev_prior = nn.Linear(hidden_dim, state_dim)
-        self.fc_rnn_hidden_embedded_obs = nn.Linear(rnn_hidden_dim + 1024 + 153, hidden_dim)  # 1024 -> 153に変更
+        self.fc_rnn_hidden_embedded_obs = nn.Linear(rnn_hidden_dim + 1024 + obs_hand_dim, hidden_dim) # 1024 -> 153に変更
         self.fc_state_mean_posterior = nn.Linear(hidden_dim, state_dim)
         self.fc_state_stddev_posterior = nn.Linear(hidden_dim, state_dim)
 
@@ -97,11 +98,11 @@ class TransitionModel(nn.Module):
         self.act = act
 
     def forward(
-            self,
-            state: torch.Tensor,
-            action: torch.Tensor,
-            rnn_hidden: torch.Tensor,
-            embedded_next_obs: torch.Tensor,
+        self,
+        state: torch.Tensor,
+        action: torch.Tensor,
+        rnn_hidden: torch.Tensor,
+        embedded_next_obs: torch.Tensor,
     ) -> Tuple[torch.Tensor]:
         """
         prior p(s_t+1 | h_t+1) と posterior q(s_t+1 | h_t+1, e_t+1) を返すメソッド．
@@ -134,7 +135,7 @@ class TransitionModel(nn.Module):
         return next_state_prior, next_state_posterior, rnn_hidden
 
     def recurrent(
-            self, state: torch.Tensor, action: torch.Tensor, rnn_hidden: torch.Tensor
+        self, state: torch.Tensor, action: torch.Tensor, rnn_hidden: torch.Tensor
     ) -> torch.Tensor:
         """
         決定的状態 h_t+1 = f(h_t, s_t, a_t)を計算するメソッド．
@@ -176,15 +177,15 @@ class TransitionModel(nn.Module):
             RNNが保持する決定的状態(h_t+1)．
             入力からのものをそのまま返しています．
         """
-        # h_t+1を求める（ヒント: self.act, self.fc_rnn_hiddenを使用）
-        hidden = self.act(self.fc_rnn_hidden(rnn_hidden))  # WRITE ME
+        #h_t+1を求める（ヒント: self.act, self.fc_rnn_hiddenを使用）
+        hidden = self.act(self.fc_rnn_hidden(rnn_hidden)) # WRITE ME
 
         mean = self.fc_state_mean_prior(hidden)
         stddev = F.softplus(self.fc_state_stddev_prior(hidden)) + self._min_stddev
         return Normal(mean, stddev), rnn_hidden
 
     def posterior(
-            self, rnn_hidden: torch.Tensor, embedded_obs: torch.Tensor
+        self, rnn_hidden: torch.Tensor, embedded_obs: torch.Tensor
     ) -> torch.Tensor:
         """
         posterior q(s_t+1 | h_t+1, e_t+1)  を計算するメソッド．
@@ -207,11 +208,11 @@ class TransitionModel(nn.Module):
         # print("rnn_hidden dtype: ", rnn_hidden.dtype)
         # print("embedded_obs shape: ", embedded_obs.shape)
         # print("embedded_obs dtype: ", embedded_obs.dtype)
-        hidden = self.act(self.fc_rnn_hidden_embedded_obs(torch.cat([rnn_hidden, embedded_obs], dim=1)))  # WRITE ME
+        hidden = self.act(self.fc_rnn_hidden_embedded_obs(torch.cat([rnn_hidden, embedded_obs], dim=1))) # WRITE ME
         mean = self.fc_state_mean_posterior(hidden)
         stddev = F.softplus(self.fc_state_stddev_posterior(hidden)) + self._min_stddev
         return Normal(mean, stddev)
-
+    
 
 class ObservationModel(nn.Module):
     """
