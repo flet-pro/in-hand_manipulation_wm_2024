@@ -19,7 +19,7 @@ else:
 try:
     import mujoco
 
-    from gymnasium_robotics.utils import mujoco_utils
+    from envs import utils
 except ImportError as e:
     MUJOCO_IMPORT_ERROR = e
 else:
@@ -37,8 +37,8 @@ class GoalEnv(gym.Env):
     r"""A goal-based environment.
 
     It functions just as any regular Gymnasium environment but it imposes a required structure on the observation_space. More concretely,
-    the observation space is required to contain at least three elements, namely `observation`, `desired_goal`, and `achieved_goal`.
-    Here, `desired_goal` specifies the goal that the agent should attempt to achieve. `achieved_goal` is the goal that it currently achieved instead.
+    the observation space is required to contain at least three elements, namely `observation`, `__goal`, and `__achieved`.
+    Here, `__goal` specifies the goal that the agent should attempt to achieve. `__achieved` is the goal that it currently achieved instead.
     `observation` contains the actual observations of the environment as per usual.
 
     - :meth:`compute_reward` - Externalizes the reward function by taking the achieved and desired goal, as well as extra information. Returns reward.
@@ -54,7 +54,7 @@ class GoalEnv(gym.Env):
     ):
         """Reset the environment.
 
-        In addition, check if the observation space is correct by inspecting the `observation`, `achieved_goal`, and `desired_goal` keys.
+        In addition, check if the observation space is correct by inspecting the `observation`, `__achieved`, and `__goal` keys.
         """
         super().reset(seed=seed)
         # Enforce that each GoalEnv uses a Goal-compatible observation space.
@@ -62,7 +62,7 @@ class GoalEnv(gym.Env):
             raise error.Error(
                 "GoalEnv requires an observation space of type gym.spaces.Dict"
             )
-        for key in ["observation", "achieved_goal", "desired_goal"]:
+        for key in ["observation", "__achieved", "__goal"]:
             if key not in self.observation_space.spaces:
                 raise error.Error(
                     'GoalEnv requires the "{}" key to be part of the observation dictionary.'.format(
@@ -71,15 +71,15 @@ class GoalEnv(gym.Env):
                 )
 
     @abstractmethod
-    def compute_reward(self, achieved_goal, desired_goal, info):
+    def compute_reward(self, __achieved, __goal, info):
         """Compute the step reward. This externalizes the reward function and makes it dependent on a desired goal and the one that was achieved.
 
         If you wish to include additional rewards that are independent of the goal, you can include the necessary values
         to derive it in 'info' and compute it accordingly.
 
         Args:
-            achieved_goal (object): the goal that was achieved during execution
-            desired_goal (object): the desired goal that we asked the agent to attempt to achieve
+            __achieved: the goal that was achieved during execution
+            __goal: the desired goal that we asked the agent to attempt to achieve
             info (dict): an info dictionary with additional information
 
         Returns:
@@ -87,12 +87,12 @@ class GoalEnv(gym.Env):
             goal. Note that the following should always hold true:
 
                 ob, reward, terminated, truncated, info = env.step()
-                assert reward == env.compute_reward(ob['achieved_goal'], ob['desired_goal'], info)
+                assert reward == env.compute_reward(ob['__achieved'], ob['__goal'], info)
         """
         raise NotImplementedError
 
     @abstractmethod
-    def compute_terminated(self, achieved_goal, desired_goal, info):
+    def compute_terminated(self, __achieved, __goal, info):
         """Compute the step termination. Allows to customize the termination states depending on the desired and the achieved goal.
 
         If you wish to determine termination states independent of the goal, you can include necessary values to derive it in 'info'
@@ -104,8 +104,8 @@ class GoalEnv(gym.Env):
         Termination states are
 
         Args:
-            achieved_goal (object): the goal that was achieved during execution
-            desired_goal (object): the desired goal that we asked the agent to attempt to achieve
+            __achieved: the goal that was achieved during execution
+            __goal: the desired goal that we asked the agent to attempt to achieve
             info (dict): an info dictionary with additional information
 
         Returns:
@@ -113,12 +113,12 @@ class GoalEnv(gym.Env):
             goal. Note that the following should always hold true:
 
                 ob, reward, terminated, truncated, info = env.step()
-                assert terminated == env.compute_terminated(ob['achieved_goal'], ob['desired_goal'], info)
+                assert terminated == env.compute_terminated(ob['__achieved'], ob['__goal'], info)
         """
         raise NotImplementedError
 
     @abstractmethod
-    def compute_truncated(self, achieved_goal, desired_goal, info):
+    def compute_truncated(self, __achieved, __goal, info):
         """Compute the step truncation. Allows to customize the truncated states depending on the desired and the achieved goal.
 
         If you wish to determine truncated states independent of the goal, you can include necessary values to derive it in 'info'
@@ -128,8 +128,8 @@ class GoalEnv(gym.Env):
         More information can be found in: https://farama.org/New-Step-API#theory
 
         Args:
-            achieved_goal (object): the goal that was achieved during execution
-            desired_goal (object): the desired goal that we asked the agent to attempt to achieve
+            __achieved: the goal that was achieved during execution
+            __goal: the desired goal that we asked the agent to attempt to achieve
             info (dict): an info dictionary with additional information
 
         Returns:
@@ -137,7 +137,7 @@ class GoalEnv(gym.Env):
             goal. Note that the following should always hold true:
 
                 ob, reward, terminated, truncated, info = env.step()
-                assert truncated == env.compute_truncated(ob['achieved_goal'], ob['desired_goal'], info)
+                assert truncated == env.compute_truncated(ob['__achieved'], ob['__goal'], info)
         """
         raise NotImplementedError
 
@@ -191,7 +191,8 @@ class BaseRobotEnv(GoalEnv):
         self.height = height
         self._initialize_simulation()
 
-        self.goal = np.zeros(0)
+        # self.goal = np.zeros(0)
+        self.goal = self._sample_goal()
         obs = self._get_obs()
 
         assert (
@@ -201,11 +202,11 @@ class BaseRobotEnv(GoalEnv):
         self.action_space = spaces.Box(-1.0, 1.0, shape=(n_actions,), dtype="float32")
         self.observation_space = spaces.Dict(
             dict(
-                desired_goal=spaces.Box(
-                    -np.inf, np.inf, shape=obs["achieved_goal"].shape, dtype="float64"
+                __goal=spaces.Box(
+                    -np.inf, np.inf, shape=obs["__goal"].shape, dtype="float64"
                 ),
-                achieved_goal=spaces.Box(
-                    -np.inf, np.inf, shape=obs["achieved_goal"].shape, dtype="float64"
+                __achieved=spaces.Box(
+                    -np.inf, np.inf, shape=obs["__achieved"].shape, dtype="float64"
                 ),
                 observation=spaces.Box(
                     -np.inf, np.inf, shape=obs["observation"].shape, dtype="float64"
@@ -217,12 +218,16 @@ class BaseRobotEnv(GoalEnv):
 
     # Env methods
     # ----------------------------
-    def compute_terminated(self, achieved_goal, desired_goal, info):
-        """All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time."""
+    def compute_terminated(self, __achieved, __goal, info):
+        """
+        All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time.
+        """
         return False
 
-    def compute_truncated(self, achieved_goal, desired_goal, info):
-        """The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper."""
+    def compute_truncated(self, __achieved, __goal, info):
+        """
+        The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper.
+        """
         return False
 
     def step(self, action):
@@ -238,7 +243,7 @@ class BaseRobotEnv(GoalEnv):
             truncated (boolean): Whether the truncation condition outside the scope of the MDP is satisfied. Timically, due to a timelimit, but
             it is also calculated in :meth:`compute_truncated` of `GoalEnv`.
             info (dictionary): Contains auxiliary diagnostic information (helpful for debugging, learning, and logging). In this case there is a single
-            key `is_success` with a boolean value, True if the `achieved_goal` is the same as the `desired_goal`.
+            key `is_success` of `info` with a boolean value, True if the `__achieved` is the same as the `__goal`.
         """
         if np.array(action).shape != self.action_space.shape:
             raise ValueError("Action dimension mismatch")
@@ -254,14 +259,12 @@ class BaseRobotEnv(GoalEnv):
             self.render()
         obs = self._get_obs()
 
-        info = {
-            "is_success": self._is_success(obs["achieved_goal"], self.goal),
-        }
+        info = self._get_info(obs["__achieved"], self.goal)
 
-        terminated = self.compute_terminated(obs["achieved_goal"], self.goal, info)
-        truncated = self.compute_truncated(obs["achieved_goal"], self.goal, info)
+        terminated = self.compute_terminated(obs["__achieved"], self.goal, info)
+        truncated = self.compute_truncated(obs["__achieved"], self.goal, info)
 
-        reward = self.compute_reward(obs["achieved_goal"], self.goal, info)
+        reward = self.compute_reward(obs["__achieved"], self.goal, info)
 
         return obs, reward, terminated, truncated, info
 
@@ -329,7 +332,7 @@ class BaseRobotEnv(GoalEnv):
         """Applies the given action to the simulation."""
         raise NotImplementedError()
 
-    def _is_success(self, achieved_goal, desired_goal):
+    def _get_info(self, __achieved, __goal):
         """Indicates whether the achieved goal successfully achieved the desired goal."""
         raise NotImplementedError()
 
@@ -389,7 +392,7 @@ class MujocoRobotEnv(BaseRobotEnv):
             )
 
         self._mujoco = mujoco
-        self._utils = mujoco_utils
+        self._utils = utils
 
         super().__init__(**kwargs)
 

@@ -33,6 +33,7 @@
                       size="0.015 0.01" rgba="0.4 0.5 0.6 0.1"></geom>
                 <body name="robot0:palm" pos="0 0 0.034">
                     <site name="robot0:is_out_of_bound" pos="0 0 0"/>
+                    <site name="robot0:palm_pos_r" pos="0 0 0" />
 
                     <inertial pos="0.006 0 0.036" quat="0.716 0.044 0.075 0.693" mass="0.3"
                               diaginertia="0.001 0.001 0.001"></inertial>

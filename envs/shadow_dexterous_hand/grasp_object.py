@@ -5,31 +5,13 @@ from gymnasium.utils import EzPickle
 from gymnasium_robotics.envs.shadow_dexterous_hand.manipulate import quat_from_angle_and_axis
 from gymnasium_robotics.utils import rotations
 
-from envs.config import GRASP_OBJECT_ENV_XML, DEFAULT_CAMERA_CONFIG
+from envs.config import GRASP_OBJECT_ENV_XML, DEFAULT_CAMERA_CONFIG, REWARD_CONFIG
 from envs.generate_target_object import generate_target_object
 from envs.robot_env import MujocoRobotEnv
 
 
-# ASSETS_DIR = os.path.abspath(os.path.join(os.path.curdir, "assets"))  # move to central place
-# MANIPULATE_SCISSORS_XML = os.path.join(ASSETS_DIR, "shadow_dexterous_hand", "manipulate_block_touch_sensors.xml")
-#
-# DEFAULT_CAMERA_CONFIG = {
-#     "distance": 0.7,  # 0.5
-#     "azimuth": 0.0,  # 55.0
-#     "elevation": -35.0,  # -25.0
-#     "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
-# }
-
-# DEFAULT_CAMERA_CONFIG = {
-#     "distance": 0.5,
-#     "azimuth": 55.0,
-#     "elevation": -25.0,
-#     "lookat": np.array([1, 0.96, 0.14]),
-# }
-
-
 def compute_pos_distance(goal_a, goal_b):
-    assert goal_a.shape == (3,) and goal_b.shape == (3,)
+    assert goal_a.shape == (3,) and goal_b.shape == (3,), [goal_a.shape, goal_b.shape]
     delta_pos = goal_a - goal_b
     d_pos = np.linalg.norm(delta_pos, axis=-1)
     return d_pos
@@ -96,15 +78,21 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
     def __init__(
             self,
             n_substeps=20,
+
             relative_control=False,
+
             pre_train=True,
             target_obj_name="random",
-            sim_pre_run=1,
+
+            sim_pre_run=10,
+
             random_init_pos="random",
             random_init_rot="random_z",
             random_pos_range=np.array([(-0.04, 0.04), (-0.06, 0.02), (0.0, 0.06)]),
+
             initial_qpos=None,
-            distance_threshold=0.01,
+
+            reward_cfg=REWARD_CONFIG,
             **kwargs,
     ):
         ## set action
@@ -133,7 +121,7 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         self.sim_pre_run = sim_pre_run
 
         ## compute reward
-        self.distance_threshold = distance_threshold
+        self.reward_cfg = reward_cfg
 
         super().__init__(
             model_path=GRASP_OBJECT_ENV_XML,
@@ -144,7 +132,7 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
             **kwargs,
         )
         EzPickle.__init__(self, n_substeps, relative_control, target_obj_name, random_init_pos, random_init_rot,
-                          random_pos_range, distance_threshold, **kwargs)
+                          random_pos_range, reward_cfg, **kwargs)
 
     def _set_action(self, action):
         ctrl_range = self.model.actuator_ctrlrange  # (26, 2)
@@ -181,6 +169,7 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
             self.data.act[:] = None
 
         self._mujoco.mj_forward(self.model, self.data)
+
         initial_qpos = self._utils.get_joint_qpos(
             self.model, self.data, "target:joint"
         ).copy()
@@ -188,7 +177,6 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
         assert initial_qpos.shape == (7,)
         assert initial_pos.shape == (3,)
         assert initial_quat.shape == (4,)
-        initial_qpos = None
 
         # Randomize initial position.
         if self.random_init_pos == "random":
@@ -235,14 +223,6 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
 
         self._utils.set_joint_qpos(self.model, self.data, "target:joint", initial_qpos)
 
-        # fixme is_on_palm should be deprecated
-        def is_on_palm():
-            self._mujoco.mj_forward(self.model, self.data)
-            cube_middle_idx = self._model_names._site_name2id["target:center"]
-            cube_middle_pos = self.data.site_xpos[cube_middle_idx]
-            is_on_palm = cube_middle_pos[2] > 0.04
-            return is_on_palm
-
         # Run the simulation for a bunch of timesteps to let everything settle in.
         for _ in range(self.sim_pre_run):
             self._set_action(np.zeros(self.action_space.shape))
@@ -253,20 +233,88 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
 
         self._mujoco.mj_forward(self.model, self.data)
 
-        return is_on_palm()
+        # print(not self.__is_object_dropped())
+        return not self.__is_object_dropped()
 
-    def __get_site_pos(self, names):
-        site_pos = []
-        for name in names:
-            self._mujoco.mj_forward(self.model, self.data)
-            cube_middle_idx = self._model_names._site_name2id[name]
-            cube_middle_pos = self.data.site_xpos[cube_middle_idx]
-            site_pos.append(cube_middle_pos)
-        return np.array(site_pos)
-
+    ### obs, info, terminated, truncated, and reward functions ###
     def _sample_goal(self):
-        goal = self.__get_site_pos(["target:center", "target:hole0", "target:hole1"])
-        return goal
+        if self.pre_train:
+            goal = self.__get_site_pos(["target:center"])
+        else:
+            goal = self.__get_site_pos(["target:center", "target:hole0", "target:hole1"])
+        return goal.ravel()
+
+    def _get_achieved(self):
+        if self.pre_train:
+            achieved = self.__get_site_pos(["robot0:palm_pos_r"])
+        else:
+            achieved = self.__get_site_pos(["robot0:ff_pos_r", "robot0:mf_pos_r", "robot0:thumb_pos_r"])
+        return achieved
+
+    def _get_obs(self):
+        robot_qpos, robot_qvel = self._utils.robot_get_obs(
+            self.model, self.data, self._model_names.joint_names
+        )
+
+        __achieved = (
+            self._get_achieved().ravel()
+        )  # this contains the object position + rotation
+
+        observation = np.concatenate(
+            [robot_qpos, robot_qvel, __achieved]
+        )
+
+        return {
+            "observation": observation.copy(),
+            "__achieved": __achieved.copy(),
+            "__goal": self.goal.copy(),
+        }
+
+    def _get_info(self, __achieved, __goal):
+        # __goal = __goal.ravel()
+        if self.pre_train:
+            palm_d = compute_pos_distance(__achieved, __goal)
+            is_in_hold = palm_d < self.reward_cfg["dis_threshold"]
+        else:
+            ff_d = compute_pos_distance(__achieved[:3], __goal[3:6])
+            mf_d = compute_pos_distance(__achieved[3:6], __goal[3:6])
+            th_d = compute_pos_distance(__achieved[6:], __goal[6:])
+            is_in_hold = ((ff_d < self.reward_cfg["dis_threshold"])
+                          and (mf_d < self.reward_cfg["dis_threshold"])
+                          and (th_d < self.reward_cfg["dis_threshold"]))
+
+        is_object_above = (self.__get_site_pos(["target:center"]).ravel()[2] - __goal[2]
+                             > self.reward_cfg["above_threshold"])
+        return {"is_success": is_object_above, "is_in_hold": is_in_hold}
+
+    def compute_terminated(self, __achieved, __goal, info):
+        """
+        All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time.
+        """
+        return (self.__is_out_of_bound() or self.__is_object_dropped()
+                or
+                info["is_success"])
+
+    def compute_truncated(self, __achieved, __goal, info):
+        """
+        The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper.
+        """
+        return False
+
+    def compute_reward(self, __achieved, __goal, info):
+        # _reward = super().compute_reward(achieved_goal, goal, info)
+        # __goal = __goal.ravel()
+        if self.__is_out_of_bound() or self.__is_object_dropped():
+            return self.reward_cfg["r_termination"]
+        if info["is_in_hold"]:
+            return 0 + (self.__get_site_pos(["target:center"]).ravel()[2] - __goal[2])
+        if self.pre_train:
+            palm_d = compute_pos_distance(__achieved, __goal)
+            return -palm_d
+        ff_d = compute_pos_distance(__achieved[:3], __goal[3:6])
+        mf_d = compute_pos_distance(__achieved[3:6], __goal[3:6])
+        th_d = compute_pos_distance(__achieved[6:], __goal[6:])
+        return -(ff_d + mf_d + th_d)
 
     def _render_callback(self):
         # Assign current state to target object but offset a bit so that the actual object
@@ -279,71 +327,24 @@ class GraspObjectEnv(MujocoRobotEnv, EzPickle):
 
         self._mujoco.mj_forward(self.model, self.data)
 
-    def _get_achieved_goal(self):
-        return self.__get_site_pos(["robot0:ff_pos_r", "robot0:mf_pos_r", "robot0:thumb_pos_r"])
-
-    def _get_obs(self):
-        robot_qpos, robot_qvel = self._utils.robot_get_obs(
-            self.model, self.data, self._model_names.joint_names
-        )
-        # object_qvel = self._utils.get_joint_qvel(self.model, self.data, "target:joint")
-        achieved_goal = (
-            self._get_achieved_goal().ravel()
-        )  # this contains the object position + rotation
-        # print(robot_qpos.shape, robot_qvel.shape, object_qvel.shape, achieved_goal.shape)
-
-        observation = np.concatenate(
-            [robot_qpos, robot_qvel, achieved_goal]
-        )
-
-        return {
-            "observation": observation.copy(),
-            "achieved_goal": achieved_goal.copy(),
-            "desired_goal": self.goal.ravel().copy(),
-        }
-
-    def _is_success(self, achieved_goal, desired_goal):
-        desired_goal = desired_goal.ravel()
-        ff_d = compute_pos_distance(achieved_goal[:3], desired_goal[3:6])
-        mf_d = compute_pos_distance(achieved_goal[3:6], desired_goal[3:6])
-        th_d = compute_pos_distance(achieved_goal[6:], desired_goal[6:])
-        is_in_hold = ((ff_d < self.distance_threshold)
-                      and (mf_d < self.distance_threshold)
-                      and (th_d < self.distance_threshold))
-
-        is_scissors_above = (self.__get_site_pos(["target:center"]).ravel()[2] - desired_goal[2]
-                             > 0.05)
-        return {"is_in_hold": is_in_hold, "is_scissors_above": is_scissors_above}
-
-    def compute_reward(self, achieved_goal, goal, info):
-        # _reward = super().compute_reward(achieved_goal, goal, info)
-        # need to get obs
-        # print(self._model_names.joint_names)
-
-        goal = goal.ravel()
-        ff_d = compute_pos_distance(achieved_goal[:3], goal[3:6])
-        mf_d = compute_pos_distance(achieved_goal[3:6], goal[3:6])
-        th_d = compute_pos_distance(achieved_goal[6:], goal[6:])
-
-        if self.__is_out_of_bound():
-            return -4
-        if info["is_success"]["is_in_hold"]:
-            return 0 + (self.__get_site_pos(["target:center"]).ravel()[2] - goal[2])
-        return -(ff_d + mf_d + th_d)
-
-    def compute_terminated(self, achieved_goal, desired_goal, info):
-        """All the available environments are currently continuing tasks and non-time dependent. The objective is to reach the goal for an indefinite period of time."""
-        return self.__is_out_of_bound() or self.__is_scissors_dropped()
-
-    def compute_truncated(self, achieved_goal, desired_goal, info):
-        """The environments will be truncated only if setting a time limit with max_steps which will automatically wrap the environment in a gymnasium TimeLimit wrapper."""
-        return False
-
     def __is_out_of_bound(self):
         hand_pos = self.__get_site_pos(["robot0:is_out_of_bound"]).ravel()
         # print(hand_pos)
         return ((hand_pos[0] < 0.4 or hand_pos[0] > 1.65) or
                 (hand_pos[1] < 0.05 or hand_pos[1] > 1.45))
 
-    def __is_scissors_dropped(self):
-        return self.goal[0, 2] - self.__get_site_pos(["target:center"]).ravel()[2] > 0.1
+    def __is_object_dropped(self):
+        # todo not work properly
+        # return self.goal[0, 2] - self.__get_site_pos(["target:center"]).ravel()[2] > 0.1
+        # print(self.__get_site_pos(["target:center"]).ravel()[2])
+        return self.__get_site_pos(["target:center"]).ravel()[2] < 0.2 - 0.02
+
+    ### util functions ###
+    def __get_site_pos(self, names):
+        site_pos = []
+        for name in names:
+            self._mujoco.mj_forward(self.model, self.data)
+            cube_middle_idx = self._model_names._site_name2id[name]
+            cube_middle_pos = self.data.site_xpos[cube_middle_idx]
+            site_pos.append(cube_middle_pos)
+        return np.array(site_pos)

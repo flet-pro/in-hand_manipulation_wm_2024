@@ -13,6 +13,12 @@ DEFAULT_CAMERA_CONFIG = {
     "lookat": np.array([1.3, 0.75, 0.45]),  # np.array([1, 0.96, 0.14])
 }
 
+REWARD_CONFIG = {
+    "dis_threshold": 0.01,
+    "above_threshold": 0.05,
+    "r_termination": -4,
+}
+
 TARGET_OBJECT_STR = """
 <mujoco>
     {}
@@ -25,8 +31,8 @@ TARGET_OBJECT_DICT = {
             '<geom name="target" euler="0 0 0" type="box" size="0.035 0.035 0.035" material="block_mat" condim="4" mass="1" />',
         "block_ball":
             '<geom name="target" euler="0 0 0" type="sphere" size="0.035" material="block_mat" condim="4" mass="1" />',
-        "block_cylinder":
-            '<geom name="target" euler="0 0 0" type="cylinder" size="0.035 0.035" material="block_mat" condim="4" mass="1" />',
+        # "block_cylinder":  fixme need to be considered
+        #     '<geom name="target" euler="0 0 0" type="cylinder" size="0.035 0.035" material="block_mat" condim="4" mass="1" />',
         "block_capsule":
             '<geom name="target" euler="0 0 0" type="capsule" size="0.025 0.035" material="block_mat" condim="4" mass="1" />'
     },
