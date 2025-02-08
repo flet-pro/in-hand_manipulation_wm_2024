@@ -48,7 +48,7 @@
         <pair geom1="robot0:C_lfdistal" geom2="robot0:C_rfmiddle" condim="1"></pair>
         <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfdistal" condim="1"></pair>
         <pair geom1="robot0:C_lfmiddle" geom2="robot0:C_rfmiddle" condim="1"></pair>
-        <pair geom1="table0" geom2="target" solref="0.02 1" solimp="0.9 0.95 0.0001"></pair>
+<!--        <pair geom1="table0" geom2="target" solref="0.02 1" solimp="0.9 0.95 0.0001"></pair>-->
     </contact>
 
     <tendon>

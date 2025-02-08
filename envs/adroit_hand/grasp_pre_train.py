@@ -23,7 +23,7 @@ from gymnasium_robotics.utils.mujoco_utils import MujocoModelNames
 from envs.config import ASSETS_DIR
 
 DEFAULT_CAMERA_CONFIG = {
-    "distance": 0.5,  # 1.5
+    "distance": 0.6,  # 1.5
     "azimuth": 90.0,
 }
 
